@@ -1,0 +1,15 @@
+[package]
+name = "flux-image"
+version = "0.1.0"
+edition = "2024"
+authors = ["Buntos <324143321+buntatoes@users.noreply.github.com>"]
+license = "MPL-2.0"
+description = "PNG, BMP, and Netpbm image decoder, encoder, and bilinear resampler."
+repository = "https://github.com/buntatoes/flux-image"
+homepage = "https://github.com/buntatoes/flux-image"
+readme = "README.md"
+keywords = ["png", "bmp", "ppm", "image", "raster"]
+categories = ["multimedia::images", "rendering::data-formats"]
+
+[dependencies]
+flux-compress = { path = "../flux-compress" }
