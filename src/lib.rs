@@ -1,4 +1,6 @@
-//! Proprietary PNG, JPEG, GIF89a, WebP, ICO, BMP, and Netpbm image decoder, encoder, and resampler.
+//! PNG, JPEG, GIF89a, WebP, ICO, BMP, and Netpbm image decoder, encoder, and resampler (Proof of Concept).
+//!
+//! Standalone `MPL-2.0` companion library for the Flux Browser Proof of Concept ecosystem.
 
 use std::fmt;
 

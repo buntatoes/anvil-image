@@ -1,10 +1,16 @@
-# flux-image
+<div align="center">
+  <h1>flux-image</h1>
+  <p><strong>PNG, JPEG, GIF89a, WebP, Windows ICO, BMP, and Netpbm Image Decoder, Encoder &amp; Resampler (Proof of Concept)</strong></p>
+  <p>
+    <a href="https://github.com/buntatoes/flux-image/releases/tag/v.04"><img src="https://img.shields.io/badge/release-v.04-e8c37a?style=flat-square" alt="Release v.04" /></a>
+    <img src="https://img.shields.io/badge/status-Proof_of_Concept_(PoC)-d4a359?style=flat-square" alt="Proof of Concept" />
+    <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MPL--2.0-blue?style=flat-square" alt="License MPL-2.0" /></a>
+    <a href="https://github.com/buntatoes/flux-image"><img src="https://img.shields.io/badge/rust-2024_edition-orange?style=flat-square" alt="Rust 2024 Edition" /></a>
+  </p>
+</div>
 
-[![Release](https://img.shields.io/badge/release-v.04-e8c37a)](https://github.com/buntatoes/flux-image/releases/tag/v.04)
-[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](./LICENSE)
-[![Edition](https://img.shields.io/badge/rust-2024_edition-orange.svg)](https://github.com/buntatoes/flux-image)
-
-`flux-image` is a standalone Rust library for decoding, encoding, and resampling raster images (**PNG**, **Baseline JPEG**, **GIF87a/GIF89a**, **WebP**, **Windows ICO**, **BMP**, and **Netpbm PPM/PGM**) into top-down 8-bit **RGBA8888** pixel buffers with strict allocation-bomb protection.
+> [!NOTE]
+> **Proof of Concept (PoC) Notice**: `flux-image` is a standalone **Proof of Concept** raster image decoding, encoding, and bilinear resampling library authored from scratch by **Buntos** as part of the [**Flux Browser**](https://github.com/buntatoes/flux-browser) engine ecosystem. It decodes and encodes **PNG**, **Baseline JPEG**, **GIF87a/GIF89a**, **WebP**, **Windows ICO**, **BMP**, and **Netpbm PPM/PGM** into top-down 8-bit **RGBA8888** pixel buffers with strict allocation-bomb protection (`MAX_IMAGE_DIMENSION = 8192`, `MAX_IMAGE_PIXELS = 16,777,216`).
 
 ---
 
@@ -21,7 +27,7 @@
   - Supports 8-bit Grayscale (`0`), Truecolor RGB (`2`), Indexed Palette (`3` with `PLTE` + `tRNS` alpha), Grayscale+Alpha (`4`), and Truecolor RGBA (`6`).
   - Implements all 5 PNG scanline reconstruction filters (`None`, `Sub`, `Up`, `Average`, `Paeth`) backed by [`flux-compress`](https://github.com/buntatoes/flux-compress).
 - **Baseline JPEG Decoder & Encoder (`decode_jpeg` / `encode_jpeg`)**:
-  - Parses `SOI`, `DQT`, `SOF0`, `DHT`, `DRI`, and `SOS` segments, decodes byte-stuffed canonical Huffman DC/AC streams, dequantizes 8×8 blocks, evaluates 2D 8×8 IDCT/FDCT, and converts grayscale or subsampled YCbCr (`4:4:4`, `4:2:2`, `4:2:0`) to RGBA8888.
+  - Parses `SOI`, `DQT`, `SOF0`, `DHT`, `DRI`, and `SOS` segments, decodes byte-stuffed canonical Huffman DC/AC streams, dequantizes 8x8 blocks, evaluates 2D 8x8 IDCT/FDCT, and converts grayscale or subsampled YCbCr (`4:4:4`, `4:2:2`, `4:2:0`) to RGBA8888.
 - **GIF87a/GIF89a Decoder & Encoder (`decode_gif` / `encode_gif`)**:
   - Parses Global and Local Color Tables, Graphic Control Extension transparency indices, interlaced row passes, and variable-width LZW code streams up to 12 bits.
 - **BMP Decoder & Encoder (`decode_bmp` / `encode_bmp`)**:
@@ -56,7 +62,7 @@ assert_eq!(thumbnail.width, 8);
 
 | Function / Method | Description |
 | :--- | :--- |
-| `decode_auto(&[u8]) -> Result<Image, ImageError>` | Detects PNG, JPEG, GIF, BMP, or PPM/PGM magic bytes and decodes into an RGBA `Image`. |
+| `decode_auto(&[u8]) -> Result<Image, ImageError>` | Detects PNG, JPEG, GIF, WebP, ICO, BMP, or PPM/PGM magic bytes and decodes into an RGBA `Image`. |
 | `validate_dimensions(u32, u32) -> Result<(), ImageError>` | Verifies image dimensions are non-zero and within `MAX_IMAGE_DIMENSION` (8192) and `MAX_IMAGE_PIXELS` (16 MP). |
 | `decode_png(&[u8]) -> Result<Image, ImageError>` | Decodes a PNG file into an RGBA `Image`. |
 | `encode_png(&Image) -> Vec<u8>` | Encodes an RGBA `Image` into a lossless 8-bit RGBA PNG file. |
@@ -64,6 +70,10 @@ assert_eq!(thumbnail.width, 8);
 | `encode_jpeg(&Image) -> Vec<u8>` | Encodes an RGBA `Image` into a baseline `SOF0` 4:4:4 JPEG file. |
 | `decode_gif(&[u8]) -> Result<Image, ImageError>` | Decodes a GIF87a/GIF89a LZW-compressed image (including transparency). |
 | `encode_gif(&Image) -> Vec<u8>` | Encodes an RGBA `Image` into a 256-color GIF89a file. |
+| `decode_webp(&[u8]) -> Result<Image, ImageError>` | Decodes a RIFF WebP container into an RGBA `Image`. |
+| `encode_webp(&Image) -> Vec<u8>` | Encodes an RGBA `Image` into a lossless RIFF WebP container. |
+| `decode_ico(&[u8]) -> Result<Image, ImageError>` | Decodes a Windows `.ico` icon directory into an RGBA `Image`. |
+| `encode_ico(&Image) -> Vec<u8>` | Encodes an RGBA `Image` into a Windows `.ico` icon file. |
 | `decode_bmp(&[u8]) -> Result<Image, ImageError>` | Decodes a 24-bit or 32-bit uncompressed BMP file. |
 | `encode_bmp(&Image) -> Vec<u8>` | Encodes an RGBA `Image` into a 32-bit top-down BMP file. |
 | `decode_ppm(&[u8]) -> Result<Image, ImageError>` | Decodes a binary `P6` or `P5` Netpbm file. |
@@ -88,4 +98,4 @@ Licensed under the Mozilla Public License Version 2.0 ([`MPL-2.0`](./LICENSE)).
 
 ## Author
 
-**Buntos**
+**Buntos** ([@buntatoes](https://github.com/buntatoes))
