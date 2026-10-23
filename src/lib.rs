@@ -2,15 +2,22 @@
 
 use std::fmt;
 
-use flux_compress::{CompressError, compress_zlib, crc32, decompress_zlib};
+use flux_compress::{CompressError, compress_zlib, crc32, decompress_zlib_bounded};
 
 const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
+
+/// Maximum single-axis dimension (width or height) accepted when decoding untrusted images.
+pub const MAX_IMAGE_DIMENSION: u32 = 8192;
+
+/// Maximum total pixel count (16 megapixels = 64 MiB RGBA) accepted when decoding untrusted images.
+pub const MAX_IMAGE_PIXELS: u64 = 16_777_216;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ImageError {
     UnexpectedEof,
     UnsupportedFormat(&'static str),
     InvalidHeader(&'static str),
+    DimensionsTooLarge { width: u32, height: u32 },
     InvalidFilter(u8),
     Compression(CompressError),
 }
@@ -21,10 +28,29 @@ impl fmt::Display for ImageError {
             Self::UnexpectedEof => write!(f, "unexpected end of image file"),
             Self::UnsupportedFormat(msg) => write!(f, "unsupported image format: {msg}"),
             Self::InvalidHeader(msg) => write!(f, "invalid image header: {msg}"),
+            Self::DimensionsTooLarge { width, height } => write!(
+                f,
+                "image dimensions {width}x{height} exceed security limits ({MAX_IMAGE_DIMENSION}x{MAX_IMAGE_DIMENSION}, {MAX_IMAGE_PIXELS} pixels)"
+            ),
             Self::InvalidFilter(kind) => write!(f, "invalid PNG scanline filter {kind}"),
             Self::Compression(err) => write!(f, "image decompression failed: {err}"),
         }
     }
+}
+
+/// Validate that `(width, height)` are non-zero and within [`MAX_IMAGE_DIMENSION`] and [`MAX_IMAGE_PIXELS`].
+pub fn validate_dimensions(width: u32, height: u32) -> Result<(), ImageError> {
+    if width == 0 || height == 0 {
+        return Err(ImageError::InvalidHeader("zero-sized image"));
+    }
+    let total_pixels = u64::from(width) * u64::from(height);
+    if width > MAX_IMAGE_DIMENSION
+        || height > MAX_IMAGE_DIMENSION
+        || total_pixels > MAX_IMAGE_PIXELS
+    {
+        return Err(ImageError::DimensionsTooLarge { width, height });
+    }
+    Ok(())
 }
 
 impl std::error::Error for ImageError {}
@@ -203,6 +229,7 @@ pub fn decode_png(bytes: &[u8]) -> Result<Image, ImageError> {
                 if width == 0 || height == 0 {
                     return Err(ImageError::InvalidHeader("zero-sized PNG"));
                 }
+                validate_dimensions(width, height)?;
                 if bit_depth != 8 {
                     return Err(ImageError::UnsupportedFormat(
                         "only 8-bit PNG depth supported",
@@ -244,9 +271,9 @@ pub fn decode_png(bytes: &[u8]) -> Result<Image, ImageError> {
         _ => return Err(ImageError::UnsupportedFormat("unsupported PNG color type")),
     };
 
-    let raw = decompress_zlib(&idat)?;
     let stride = (width as usize) * bpp;
     let expected_raw = (height as usize) * (1 + stride);
+    let raw = decompress_zlib_bounded(&idat, expected_raw.saturating_add(4096))?;
     if raw.len() < expected_raw {
         return Err(ImageError::UnexpectedEof);
     }
@@ -402,6 +429,7 @@ pub fn decode_bmp(bytes: &[u8]) -> Result<Image, ImageError> {
     let width = width_i32 as u32;
     let top_down = height_i32 < 0;
     let height = height_i32.unsigned_abs();
+    validate_dimensions(width, height)?;
     let bytes_per_pixel = (bpp / 8) as usize;
     let row_stride = ((width as usize) * bytes_per_pixel + 3) & !3;
 
@@ -478,6 +506,7 @@ pub fn decode_ppm(bytes: &[u8]) -> Result<Image, ImageError> {
     if width == 0 || height == 0 || maxval == 0 || maxval > 255 {
         return Err(ImageError::InvalidHeader("invalid PPM header values"));
     }
+    validate_dimensions(width, height)?;
     if pos >= bytes.len() {
         return Err(ImageError::UnexpectedEof);
     }
@@ -559,6 +588,7 @@ pub fn decode_gif(bytes: &[u8]) -> Result<Image, ImageError> {
     if screen_w == 0 || screen_h == 0 {
         return Err(ImageError::InvalidHeader("zero-sized GIF"));
     }
+    validate_dimensions(screen_w, screen_h)?;
     let packed = bytes[10];
     let has_gct = (packed & 0x80) != 0;
     let gct_size = 1usize << ((packed & 0x07) + 1);
@@ -628,6 +658,7 @@ pub fn decode_gif(bytes: &[u8]) -> Result<Image, ImageError> {
                 let top = u16::from_le_bytes([bytes[pos + 2], bytes[pos + 3]]) as u32;
                 let img_w = u16::from_le_bytes([bytes[pos + 4], bytes[pos + 5]]) as u32;
                 let img_h = u16::from_le_bytes([bytes[pos + 6], bytes[pos + 7]]) as u32;
+                validate_dimensions(img_w, img_h)?;
                 let img_packed = bytes[pos + 8];
                 pos += 9;
 
@@ -1124,6 +1155,7 @@ pub fn decode_jpeg(bytes: &[u8]) -> Result<Image, ImageError> {
                 {
                     return Err(ImageError::InvalidHeader("invalid SOF0 dimensions"));
                 }
+                validate_dimensions(width, height)?;
                 components.clear();
                 for i in 0..ncomp {
                     let base = 6 + i * 3;
@@ -1632,5 +1664,31 @@ mod tests {
         assert_eq!(scaled.height, 6);
         assert_eq!(scaled.pixel(0, 0), Some([255, 0, 0, 255]));
         assert_eq!(scaled.pixel(7, 5), Some([255, 255, 255, 255]));
+    }
+
+    #[test]
+    fn rejects_adversarial_image_dimensions_exceeding_security_caps() {
+        assert!(matches!(
+            validate_dimensions(16384, 16384),
+            Err(ImageError::DimensionsTooLarge {
+                width: 16384,
+                height: 16384
+            })
+        ));
+        let mut fake_png = Vec::new();
+        fake_png.extend_from_slice(&PNG_SIGNATURE);
+        let mut ihdr = Vec::new();
+        ihdr.extend_from_slice(&20000u32.to_be_bytes());
+        ihdr.extend_from_slice(&20000u32.to_be_bytes());
+        ihdr.extend_from_slice(&[8, 6, 0, 0, 0]);
+        write_png_chunk(&mut fake_png, b"IHDR", &ihdr);
+        write_png_chunk(&mut fake_png, b"IEND", &[]);
+        assert!(matches!(
+            decode_png(&fake_png),
+            Err(ImageError::DimensionsTooLarge {
+                width: 20000,
+                height: 20000
+            })
+        ));
     }
 }

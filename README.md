@@ -1,16 +1,18 @@
 # flux-image
 
-[![Release](https://img.shields.io/badge/release-v.02-e8c37a)](https://github.com/buntatoes/flux-image/releases/tag/v.02)
+[![Release](https://img.shields.io/badge/release-v.03-e8c37a)](https://github.com/buntatoes/flux-image/releases/tag/v.03)
 [![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](./LICENSE)
 [![Edition](https://img.shields.io/badge/rust-2024_edition-orange.svg)](https://github.com/buntatoes/flux-image)
 
-`flux-image` is a standalone Rust library for decoding, encoding, and resampling raster images (**PNG**, **Baseline JPEG**, **GIF87a/GIF89a**, **BMP**, and **Netpbm PPM/PGM**) into top-down 8-bit **RGBA8888** pixel buffers.
+`flux-image` is a standalone Rust library for decoding, encoding, and resampling raster images (**PNG**, **Baseline JPEG**, **GIF87a/GIF89a**, **BMP**, and **Netpbm PPM/PGM**) into top-down 8-bit **RGBA8888** pixel buffers with strict allocation-bomb protection.
 
 ---
 
 ## Features
 
 - **Automatic Format Detection (`decode_auto`)**: Inspects magic bytes to dispatch the appropriate PNG, JPEG, GIF87a/GIF89a, BMP, or PPM/PGM decoder.
+- **Allocation-Bomb & Decompression-Bomb Guard (`validate_dimensions`)**:
+  - Enforces `MAX_IMAGE_DIMENSION = 8192` and `MAX_IMAGE_PIXELS = 16,777,216` (64 MiB RGBA ceiling) across all image formats and bounds PNG zlib stream expansion before allocating pixel buffers.
 - **PNG Decoder & Encoder (`decode_png` / `encode_png`)**:
   - Supports 8-bit Grayscale (`0`), Truecolor RGB (`2`), Indexed Palette (`3` with `PLTE` + `tRNS` alpha), Grayscale+Alpha (`4`), and Truecolor RGBA (`6`).
   - Implements all 5 PNG scanline reconstruction filters (`None`, `Sub`, `Up`, `Average`, `Paeth`) backed by [`flux-compress`](https://github.com/buntatoes/flux-compress).
@@ -30,8 +32,9 @@
 ## Quick Start
 
 ```rust
-use flux_image::{Image, decode_auto, encode_jpeg, encode_png};
+use flux_image::{Image, decode_auto, encode_jpeg, encode_png, validate_dimensions};
 
+validate_dimensions(16, 16).expect("dimensions within safety ceiling");
 let mut img = Image::new(16, 16);
 img.set_pixel(0, 0, [232, 195, 122, 255]);
 
@@ -50,6 +53,7 @@ assert_eq!(thumbnail.width, 8);
 | Function / Method | Description |
 | :--- | :--- |
 | `decode_auto(&[u8]) -> Result<Image, ImageError>` | Detects PNG, JPEG, GIF, BMP, or PPM/PGM magic bytes and decodes into an RGBA `Image`. |
+| `validate_dimensions(u32, u32) -> Result<(), ImageError>` | Verifies image dimensions are non-zero and within `MAX_IMAGE_DIMENSION` (8192) and `MAX_IMAGE_PIXELS` (16 MP). |
 | `decode_png(&[u8]) -> Result<Image, ImageError>` | Decodes a PNG file into an RGBA `Image`. |
 | `encode_png(&Image) -> Vec<u8>` | Encodes an RGBA `Image` into a lossless 8-bit RGBA PNG file. |
 | `decode_jpeg(&[u8]) -> Result<Image, ImageError>` | Decodes a baseline (`SOF0`) grayscale or YCbCr JPEG file. |
