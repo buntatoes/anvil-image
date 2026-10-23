@@ -10,8 +10,7 @@
   </p>
 </div>
 
-> [!NOTE]
-> **Proof of Concept (PoC) Notice**: `flux-image` is a standalone **Proof of Concept** raster image decoding, encoding, and bilinear resampling library authored from scratch by **Buntos** as part of the [**Flux Browser**](https://github.com/buntatoes/flux-browser) engine ecosystem. It decodes and encodes **PNG**, **Baseline JPEG**, **GIF87a/GIF89a**, **WebP**, **Windows ICO**, **BMP**, and **Netpbm PPM/PGM** into top-down 8-bit **RGBA8888** pixel buffers with strict allocation-bomb protection (`MAX_IMAGE_DIMENSION = 8192`, `MAX_IMAGE_PIXELS = 16,777,216`).
+`flux-image` is a standalone Rust library for decoding, encoding, and bilinear resampling of raster images (**PNG**, **Baseline JPEG**, **GIF87a/GIF89a**, **WebP**, **Windows ICO**, **BMP**, and **Netpbm PPM/PGM**) into top-down 8-bit **RGBA8888** pixel buffers with strict allocation-bomb protection (`MAX_IMAGE_DIMENSION = 8192`, `MAX_IMAGE_PIXELS = 16,777,216`), built from scratch as part of the [**Flux Browser**](https://github.com/buntatoes/flux-browser) Proof of Concept engine ecosystem.
 
 ---
 

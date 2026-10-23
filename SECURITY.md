@@ -2,7 +2,7 @@
 
 ## Proof of Concept (PoC) Notice
 
-`flux-image` is a standalone **Proof of Concept (PoC)** raster image decoder, encoder, and bilinear resampler (`PNG`, `JPEG`, `GIF89a`, `WebP`, `ICO`, `BMP`, `PPM/PGM`) authored from scratch by **Buntos** as part of the [**Flux Browser**](https://github.com/buntatoes/flux-browser) engine ecosystem.
+`flux-image` is a standalone **Proof of Concept (PoC)** raster image decoder, encoder, and bilinear resampler (`PNG`, `JPEG`, `GIF89a`, `WebP`, `ICO`, `BMP`, `PPM/PGM`) built from scratch as part of the [**Flux Browser**](https://github.com/buntatoes/flux-browser) engine ecosystem.
 
 ---
 
