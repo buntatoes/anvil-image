@@ -1,18 +1,22 @@
 # flux-image
 
-[![Release](https://img.shields.io/badge/release-v.03-e8c37a)](https://github.com/buntatoes/flux-image/releases/tag/v.03)
+[![Release](https://img.shields.io/badge/release-v.04-e8c37a)](https://github.com/buntatoes/flux-image/releases/tag/v.04)
 [![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](./LICENSE)
 [![Edition](https://img.shields.io/badge/rust-2024_edition-orange.svg)](https://github.com/buntatoes/flux-image)
 
-`flux-image` is a standalone Rust library for decoding, encoding, and resampling raster images (**PNG**, **Baseline JPEG**, **GIF87a/GIF89a**, **BMP**, and **Netpbm PPM/PGM**) into top-down 8-bit **RGBA8888** pixel buffers with strict allocation-bomb protection.
+`flux-image` is a standalone Rust library for decoding, encoding, and resampling raster images (**PNG**, **Baseline JPEG**, **GIF87a/GIF89a**, **WebP**, **Windows ICO**, **BMP**, and **Netpbm PPM/PGM**) into top-down 8-bit **RGBA8888** pixel buffers with strict allocation-bomb protection.
 
 ---
 
-## Features
+## Features (`v.04`)
 
-- **Automatic Format Detection (`decode_auto`)**: Inspects magic bytes to dispatch the appropriate PNG, JPEG, GIF87a/GIF89a, BMP, or PPM/PGM decoder.
+- **Automatic Format Detection (`decode_auto`)**: Inspects magic bytes to dispatch the appropriate PNG, JPEG, GIF87a/GIF89a, WebP (`RIFF....WEBP`), Windows ICO, BMP, or PPM/PGM decoder.
 - **Allocation-Bomb & Decompression-Bomb Guard (`validate_dimensions`)**:
-  - Enforces `MAX_IMAGE_DIMENSION = 8192` and `MAX_IMAGE_PIXELS = 16,777,216` (64 MiB RGBA ceiling) across all image formats and bounds PNG zlib stream expansion before allocating pixel buffers.
+  - Enforces `MAX_IMAGE_DIMENSION = 8192` and `MAX_IMAGE_PIXELS = 16,777,216` (64 MiB RGBA ceiling) across all image formats and bounds PNG/WebP zlib stream expansion before allocating pixel buffers.
+- **Windows `.ico` / Favicon Decoder & Encoder (`decode_ico` / `encode_ico`)**:
+  - Parses multi-entry `.ico` icon directories, selects the highest-resolution valid icon entry, and decodes embedded PNG or 24/32-bit DIB icon frames into `RGBA8888`.
+- **RIFF WebP Container Decoder & Encoder (`decode_webp` / `encode_webp`)**:
+  - Parses `RIFF....WEBP` containers (`VP8X`, `VP8L`, and lossless `RGBA` chunks) with pre-allocation dimension validation.
 - **PNG Decoder & Encoder (`decode_png` / `encode_png`)**:
   - Supports 8-bit Grayscale (`0`), Truecolor RGB (`2`), Indexed Palette (`3` with `PLTE` + `tRNS` alpha), Grayscale+Alpha (`4`), and Truecolor RGBA (`6`).
   - Implements all 5 PNG scanline reconstruction filters (`None`, `Sub`, `Up`, `Average`, `Paeth`) backed by [`flux-compress`](https://github.com/buntatoes/flux-compress).

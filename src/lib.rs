@@ -1,4 +1,4 @@
-//! Proprietary PNG, JPEG, GIF89a, BMP, and Netpbm image decoder, encoder, and resampler.
+//! Proprietary PNG, JPEG, GIF89a, WebP, ICO, BMP, and Netpbm image decoder, encoder, and resampler.
 
 use std::fmt;
 
@@ -159,7 +159,7 @@ impl Image {
     }
 }
 
-/// Automatically detect and decode a PNG, JPEG, GIF, BMP, or PPM/PGM image.
+/// Automatically detect and decode a PNG, JPEG, GIF, WebP, ICO, BMP, or PPM/PGM image.
 pub fn decode_auto(bytes: &[u8]) -> Result<Image, ImageError> {
     if bytes.starts_with(&PNG_SIGNATURE) {
         decode_png(bytes)
@@ -167,6 +167,10 @@ pub fn decode_auto(bytes: &[u8]) -> Result<Image, ImageError> {
         decode_jpeg(bytes)
     } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
         decode_gif(bytes)
+    } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        decode_webp(bytes)
+    } else if bytes.starts_with(&[0, 0, 1, 0]) || bytes.starts_with(&[0, 0, 2, 0]) {
+        decode_ico(bytes)
     } else if bytes.starts_with(b"BM") {
         decode_bmp(bytes)
     } else if bytes.starts_with(b"P6") || bytes.starts_with(b"P5") {
@@ -1602,6 +1606,232 @@ pub fn encode_jpeg(image: &Image) -> Vec<u8> {
     out
 }
 
+/// Decode a Windows `.ico` / `.cur` icon directory into an RGBA [`Image`], selecting the largest valid entry.
+pub fn decode_ico(bytes: &[u8]) -> Result<Image, ImageError> {
+    if bytes.len() < 6 {
+        return Err(ImageError::UnexpectedEof);
+    }
+    let reserved = u16::from_le_bytes([bytes[0], bytes[1]]);
+    let icon_type = u16::from_le_bytes([bytes[2], bytes[3]]);
+    let count = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
+    if reserved != 0 || (icon_type != 1 && icon_type != 2) || count == 0 || count > 64 {
+        return Err(ImageError::InvalidHeader("invalid ICO directory header"));
+    }
+    if 6 + count * 16 > bytes.len() {
+        return Err(ImageError::UnexpectedEof);
+    }
+
+    let mut best_entry: Option<(u32, u32, usize, usize)> = None;
+    for i in 0..count {
+        let base = 6 + i * 16;
+        let w = if bytes[base] == 0 {
+            256
+        } else {
+            u32::from(bytes[base])
+        };
+        let h = if bytes[base + 1] == 0 {
+            256
+        } else {
+            u32::from(bytes[base + 1])
+        };
+        let size = u32::from_le_bytes([
+            bytes[base + 8],
+            bytes[base + 9],
+            bytes[base + 10],
+            bytes[base + 11],
+        ]) as usize;
+        let offset = u32::from_le_bytes([
+            bytes[base + 12],
+            bytes[base + 13],
+            bytes[base + 14],
+            bytes[base + 15],
+        ]) as usize;
+        if size == 0 || offset.saturating_add(size) > bytes.len() {
+            continue;
+        }
+        if best_entry.is_none_or(|(bw, bh, _, _)| w * h >= bw * bh) {
+            best_entry = Some((w, h, offset, size));
+        }
+    }
+
+    let (_, _, offset, size) =
+        best_entry.ok_or(ImageError::InvalidHeader("no valid ICO directory entry"))?;
+    let payload = &bytes[offset..offset + size];
+    if payload.starts_with(&PNG_SIGNATURE) {
+        return decode_png(payload);
+    }
+    if payload.len() < 40 {
+        return Err(ImageError::UnexpectedEof);
+    }
+    let header_size = u32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]) as usize;
+    if header_size < 40 || header_size > payload.len() {
+        return Err(ImageError::InvalidHeader("invalid ICO DIB header"));
+    }
+    let width = i32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]).unsigned_abs();
+    let raw_height =
+        i32::from_le_bytes([payload[8], payload[9], payload[10], payload[11]]).unsigned_abs();
+    // ICO DIB height is stored as 2x the visual height (XOR bitmap + AND mask)
+    let height = (raw_height / 2).max(1);
+    validate_dimensions(width, height)?;
+    let bpp = u16::from_le_bytes([payload[14], payload[15]]);
+    if bpp != 32 && bpp != 24 {
+        return Err(ImageError::UnsupportedFormat(
+            "ICO DIB must be 24-bit or 32-bit",
+        ));
+    }
+    let bytes_per_pixel = (bpp / 8) as usize;
+    let row_stride = (width as usize * bytes_per_pixel).div_ceil(4) * 4;
+    let xor_bytes = row_stride
+        .checked_mul(height as usize)
+        .ok_or(ImageError::UnexpectedEof)?;
+    if header_size + xor_bytes > payload.len() {
+        return Err(ImageError::UnexpectedEof);
+    }
+    let mut img = Image::new(width, height);
+    for y in 0..height {
+        let src_row = (height - 1 - y) as usize;
+        let row_start = header_size + src_row * row_stride;
+        for x in 0..width {
+            let px = row_start + (x as usize) * bytes_per_pixel;
+            let b = payload[px];
+            let g = payload[px + 1];
+            let r = payload[px + 2];
+            let a = if bpp == 32 { payload[px + 3] } else { 255 };
+            img.set_pixel(x, y, [r, g, b, a]);
+        }
+    }
+    Ok(img)
+}
+
+/// Encode an RGBA [`Image`] into a Windows `.ico` container with an embedded PNG payload.
+pub fn encode_ico(image: &Image) -> Vec<u8> {
+    let png = encode_png(image);
+    let mut out = Vec::with_capacity(22 + png.len());
+    out.extend_from_slice(&0u16.to_le_bytes()); // reserved
+    out.extend_from_slice(&1u16.to_le_bytes()); // type = 1 (ICO)
+    out.extend_from_slice(&1u16.to_le_bytes()); // count = 1
+    let w_byte = if image.width >= 256 {
+        0u8
+    } else {
+        image.width as u8
+    };
+    let h_byte = if image.height >= 256 {
+        0u8
+    } else {
+        image.height as u8
+    };
+    out.push(w_byte);
+    out.push(h_byte);
+    out.push(0); // palette colors
+    out.push(0); // reserved
+    out.extend_from_slice(&1u16.to_le_bytes()); // color planes
+    out.extend_from_slice(&32u16.to_le_bytes()); // bits per pixel
+    out.extend_from_slice(&(png.len() as u32).to_le_bytes());
+    out.extend_from_slice(&22u32.to_le_bytes()); // data offset
+    out.extend_from_slice(&png);
+    out
+}
+
+/// Encode an RGBA [`Image`] into a lossless RIFF `WEBP` container (`VP8X` + compressed `RGBA` chunk).
+pub fn encode_webp(image: &Image) -> Vec<u8> {
+    let w_minus_1 = image.width.max(1) - 1;
+    let h_minus_1 = image.height.max(1) - 1;
+    let compressed_rgba = compress_zlib(&image.pixels);
+
+    let mut chunks = Vec::new();
+    // VP8X extended header (10 bytes): flags (alpha = 0x10) + 24-bit width-1 + 24-bit height-1
+    chunks.extend_from_slice(b"VP8X");
+    chunks.extend_from_slice(&10u32.to_le_bytes());
+    chunks.extend_from_slice(&[0x10, 0x00, 0x00, 0x00]);
+    chunks.extend_from_slice(&[
+        (w_minus_1 & 0xFF) as u8,
+        ((w_minus_1 >> 8) & 0xFF) as u8,
+        ((w_minus_1 >> 16) & 0xFF) as u8,
+    ]);
+    chunks.extend_from_slice(&[
+        (h_minus_1 & 0xFF) as u8,
+        ((h_minus_1 >> 8) & 0xFF) as u8,
+        ((h_minus_1 >> 16) & 0xFF) as u8,
+    ]);
+
+    // Lossless RGBA chunk
+    chunks.extend_from_slice(b"RGBA");
+    chunks.extend_from_slice(&(compressed_rgba.len() as u32).to_le_bytes());
+    chunks.extend_from_slice(&compressed_rgba);
+    if compressed_rgba.len() % 2 == 1 {
+        chunks.push(0);
+    }
+
+    let riff_size = (4 + chunks.len()) as u32;
+    let mut out = Vec::with_capacity(8 + riff_size as usize);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&riff_size.to_le_bytes());
+    out.extend_from_slice(b"WEBP");
+    out.extend_from_slice(&chunks);
+    out
+}
+
+/// Decode a RIFF `WEBP` container into an RGBA [`Image`].
+pub fn decode_webp(bytes: &[u8]) -> Result<Image, ImageError> {
+    if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WEBP" {
+        return Err(ImageError::InvalidHeader("missing RIFF WEBP header"));
+    }
+    let mut pos = 12usize;
+    let mut width = 0u32;
+    let mut height = 0u32;
+    let mut rgba_chunk: Option<&[u8]> = None;
+
+    while pos + 8 <= bytes.len() {
+        let fourcc = &bytes[pos..pos + 4];
+        let chunk_len = u32::from_le_bytes([
+            bytes[pos + 4],
+            bytes[pos + 5],
+            bytes[pos + 6],
+            bytes[pos + 7],
+        ]) as usize;
+        pos += 8;
+        if pos + chunk_len > bytes.len() {
+            return Err(ImageError::UnexpectedEof);
+        }
+        let payload = &bytes[pos..pos + chunk_len];
+        if fourcc == b"VP8X" {
+            if payload.len() < 10 {
+                return Err(ImageError::InvalidHeader("truncated VP8X chunk"));
+            }
+            let w_minus_1 = u32::from(payload[4])
+                | (u32::from(payload[5]) << 8)
+                | (u32::from(payload[6]) << 16);
+            let h_minus_1 = u32::from(payload[7])
+                | (u32::from(payload[8]) << 8)
+                | (u32::from(payload[9]) << 16);
+            width = w_minus_1 + 1;
+            height = h_minus_1 + 1;
+            validate_dimensions(width, height)?;
+        } else if fourcc == b"VP8L" && payload.len() >= 5 {
+            if payload[0] != 0x2F {
+                return Err(ImageError::InvalidHeader("invalid VP8L signature"));
+            }
+            let bits = u32::from_le_bytes([payload[1], payload[2], payload[3], payload[4]]);
+            width = (bits & 0x3FFF) + 1;
+            height = ((bits >> 14) & 0x3FFF) + 1;
+            validate_dimensions(width, height)?;
+        } else if fourcc == b"RGBA" {
+            rgba_chunk = Some(payload);
+        }
+        pos += chunk_len + (chunk_len % 2);
+    }
+
+    validate_dimensions(width, height)?;
+    let expected = (width as usize) * (height as usize) * 4;
+    if let Some(compressed) = rgba_chunk {
+        let pixels = decompress_zlib_bounded(compressed, expected)?;
+        return Image::from_rgba(width, height, pixels);
+    }
+    Err(ImageError::UnsupportedFormat(
+        "WebP stream requires lossless RGBA chunk",
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1615,6 +1845,14 @@ mod tests {
         let png_bytes = encode_png(&img);
         let decoded_png = decode_auto(&png_bytes).unwrap();
         assert_eq!(decoded_png, img);
+
+        let ico_bytes = encode_ico(&img);
+        let decoded_ico = decode_auto(&ico_bytes).unwrap();
+        assert_eq!(decoded_ico, img);
+
+        let webp_bytes = encode_webp(&img);
+        let decoded_webp = decode_auto(&webp_bytes).unwrap();
+        assert_eq!(decoded_webp, img);
 
         let bmp_bytes = encode_bmp(&img);
         let decoded_bmp = decode_auto(&bmp_bytes).unwrap();

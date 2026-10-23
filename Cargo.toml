@@ -1,14 +1,14 @@
 [package]
 name = "flux-image"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 authors = ["Buntos <324143321+buntatoes@users.noreply.github.com>"]
 license = "MPL-2.0"
-description = "PNG, JPEG, GIF89a, BMP, and Netpbm image decoder, encoder, bilinear resampler, and allocation-bomb guard."
+description = "PNG, JPEG, GIF89a, WebP, ICO, BMP, and Netpbm image decoder, encoder, bilinear resampler, and allocation-bomb guard."
 repository = "https://github.com/buntatoes/flux-image"
 homepage = "https://github.com/buntatoes/flux-image"
 readme = "README.md"
-keywords = ["png", "jpeg", "gif", "bmp", "image"]
+keywords = ["png", "jpeg", "webp", "ico", "image"]
 categories = ["multimedia::images", "rendering::data-formats"]
 
 [dependencies]
