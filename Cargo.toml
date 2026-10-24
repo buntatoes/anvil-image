@@ -1,21 +1,21 @@
-# Still-image decode, encode, and bilinear resample. PNG IDAT uses flux-compress.
+# Still-image decode, encode, and bilinear resample. PNG IDAT uses root-compress.
 # Caps: 8192 px per side and 16,777,216 pixels.
-# Callers: flux-layout (intrinsic img size), flux-raster (pixel sample),
-# flux-browser (decode_auto on page images). CPU only.
+# Callers: root-layout (intrinsic img size), root-raster (pixel sample),
+# root-browser (decode_auto on page images). CPU only.
 
 [package]
-name = "flux-image"
+name = "root-image"
 version = "0.5.0"
 edition = "2024"
 authors = ["Buntos <324143321+buntatoes@users.noreply.github.com>"]
 license = "MPL-2.0"
 description = "PNG, JPEG, GIF, WebP, ICO, BMP, and PPM. PNG chunk checksums are checked."
-repository = "https://github.com/buntatoes/flux-image"
-homepage = "https://github.com/buntatoes/flux-image"
+repository = "https://github.com/buntatoes/root-image"
+homepage = "https://github.com/buntatoes/root-image"
 readme = "README.md"
 keywords = ["png", "jpeg", "webp", "image"]
 categories = ["multimedia::images", "rendering::data-formats"]
 publish = false
 
 [dependencies]
-flux-compress = { path = "../flux-compress" }
+root-compress = { path = "../root-compress" }
