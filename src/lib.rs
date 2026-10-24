@@ -208,7 +208,19 @@ pub fn decode_png(bytes: &[u8]) -> Result<Image, ImageError> {
             return Err(ImageError::UnexpectedEof);
         }
         let chunk_data = &bytes[pos..pos + len];
-        pos += len + 4; // skip 4-byte chunk CRC
+        let crc_got = u32::from_be_bytes([
+            bytes[pos + len],
+            bytes[pos + len + 1],
+            bytes[pos + len + 2],
+            bytes[pos + len + 3],
+        ]);
+        let mut crc_input = Vec::with_capacity(4 + len);
+        crc_input.extend_from_slice(kind);
+        crc_input.extend_from_slice(chunk_data);
+        if crc32(&crc_input) != crc_got {
+            return Err(ImageError::InvalidHeader("bad png chunk checksum"));
+        }
+        pos += len + 4;
 
         match kind {
             b"IHDR" => {
@@ -1847,6 +1859,10 @@ mod tests {
         let png_bytes = encode_png(&img);
         let decoded_png = decode_auto(&png_bytes).unwrap();
         assert_eq!(decoded_png, img);
+
+        let mut bad = png_bytes.clone();
+        bad[16] ^= 0xff;
+        assert!(decode_png(&bad).is_err());
 
         let ico_bytes = encode_ico(&img);
         let decoded_ico = decode_auto(&ico_bytes).unwrap();
