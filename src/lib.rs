@@ -6,7 +6,7 @@
 //!   0 (gray), 2 (RGB), 3 (indexed), 4 (gray plus alpha), and 6 (RGBA).
 //!   Adam7 interlacing, bit depths other than 8, and non-zero compression or
 //!   filter methods are rejected. Each chunk's CRC-32 is checked. `IDAT`
-//!   payloads are concatenated and inflated with `root-compress`.
+//!   payloads are concatenated and inflated with `anvil-compress`.
 //! * JPEG: baseline `SOF0` only, 8-bit, one component (gray) or three (YCbCr).
 //!   Markers actually read are `DQT`, `DHT`, `DRI`, `SOF0`, and `SOS`, plus
 //!   byte stuffing and restart markers inside the scan. Progressive, arithmetic,
@@ -26,23 +26,23 @@
 //! * Binary Netpbm: `P6` (RGB) and `P5` (gray) with `maxval` in `1..=255`.
 //!   ASCII `P2` and `P3`, and 16-bit samples, are rejected.
 //!
-//! [`decode_auto`] matches those signatures in that order. `root-browser`
-//! calls it when a page image has been fetched. `root-dom` only stores the
-//! URL. `root-layout` reads intrinsic width and height from an [`Image`] the
-//! caller already decoded. `root-raster` samples those pixels. Encoders write the same formats back out; GIF and JPEG clamp
+//! [`decode_auto`] matches those signatures in that order. `anvil-browser`
+//! calls it when a page image has been fetched. `anvil-dom` only stores the
+//! URL. `anvil-layout` reads intrinsic width and height from an [`Image`] the
+//! caller already decoded. `anvil-raster` samples those pixels. Encoders write the same formats back out; GIF and JPEG clamp
 //! each side to 65535 samples, and the WebP encoder does not emit a standard
 //! `VP8` or `VP8L` bitstream.
 //!
 //! Width and height must each be in `1..=`[`MAX_IMAGE_DIMENSION`] and the product
 //! must be at most [`MAX_IMAGE_PIXELS`] (8192 on a side, 16,777,216 pixels).
-//! `root-compress` supplies zlib inflate and deflate (`decompress_zlib_bounded`,
+//! `anvil-compress` supplies zlib inflate and deflate (`decompress_zlib_bounded`,
 //! `compress_zlib`) and the PNG chunk CRC-32. There is no color-management path:
 //! `gAMA`, `cHRM`, `iCCP`, and similar ancillary chunks are checksummed and ignored.
 //! There is no animated multi-frame playback pipeline. This crate does not talk to a GPU.
 
 use std::fmt;
 
-use root_compress::{CompressError, compress_zlib, crc32, decompress_zlib_bounded};
+use anvil_compress::{CompressError, compress_zlib, crc32, decompress_zlib_bounded};
 
 /// Eight-byte PNG signature. Compared in full before any chunk is read.
 const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -85,7 +85,7 @@ pub enum ImageError {
     ///
     /// The stored value is the rejected filter byte.
     InvalidFilter(u8),
-    /// `root-compress` failed while inflating a PNG `IDAT` or a WebP `RGBA` chunk.
+    /// `anvil-compress` failed while inflating a PNG `IDAT` or a WebP `RGBA` chunk.
     Compression(CompressError),
 }
 
@@ -131,7 +131,7 @@ pub fn validate_dimensions(width: u32, height: u32) -> Result<(), ImageError> {
 /// Allows `?` from this error into other crates' error types.
 impl std::error::Error for ImageError {}
 
-/// Map a zlib failure from `root-compress` onto [`ImageError::Compression`].
+/// Map a zlib failure from `anvil-compress` onto [`ImageError::Compression`].
 impl From<CompressError> for ImageError {
     /// Store `value` in [`ImageError::Compression`] without inspecting it.
     fn from(value: CompressError) -> Self {
@@ -273,7 +273,7 @@ impl Image {
 /// Signature order is PNG, JPEG (`FF D8`), `GIF87a` or `GIF89a`, RIFF `WEBP`,
 /// ICO (`00 00 01 00`) or CUR (`00 00 02 00`), BMP (`BM`), then binary `P6` or `P5`.
 /// The first match wins. Anything else returns [`ImageError::UnsupportedFormat`].
-/// `root-dom` and `root-browser` use this for page images. Dimension and format
+/// `anvil-dom` and `anvil-browser` use this for page images. Dimension and format
 /// errors are those of the chosen decoder.
 pub fn decode_auto(bytes: &[u8]) -> Result<Image, ImageError> {
     if bytes.starts_with(&PNG_SIGNATURE) {
@@ -302,7 +302,7 @@ pub fn decode_auto(bytes: &[u8]) -> Result<Image, ImageError> {
 /// Chunk layout, repeated until `IEND` or the buffer ends: 4-byte big-endian length,
 /// 4-byte type, `length` data bytes, 4-byte big-endian CRC-32. The CRC covers the
 /// type and the data, not the length field or the CRC itself, and is computed by
-/// [`crc32`](root_compress::crc32). A bad CRC is [`ImageError::InvalidHeader`].
+/// [`crc32`](anvil_compress::crc32). A bad CRC is [`ImageError::InvalidHeader`].
 /// A chunk that would run past the buffer is [`ImageError::UnexpectedEof`].
 ///
 /// `IHDR` must be 13 bytes: width, height, bit depth, color type, compression
@@ -310,7 +310,7 @@ pub fn decode_auto(bytes: &[u8]) -> Result<Image, ImageError> {
 /// are accepted, so Adam7 is rejected as [`ImageError::UnsupportedFormat`].
 /// `PLTE` is read as RGB triples. `tRNS` is kept as raw bytes (one alpha per
 /// palette index for color type 3). Every `IDAT` is appended in order and inflated
-/// with [`decompress_zlib_bounded`](root_compress::decompress_zlib_bounded).
+/// with [`decompress_zlib_bounded`](anvil_compress::decompress_zlib_bounded).
 /// Unknown chunks are skipped after the CRC check, including color-profile chunks.
 ///
 /// Each inflated scanline is one filter byte plus `width * bytes_per_pixel` samples.
@@ -512,7 +512,7 @@ pub fn decode_png(bytes: &[u8]) -> Result<Image, ImageError> {
 /// Writes the PNG signature, one `IHDR` (bit depth 8, color type 6, methods 0),
 /// one `IDAT`, and `IEND`. Scanlines use filter 0 (None): a zero byte followed by
 /// the raw RGBA row. The filtered bytes are zlib-wrapped by
-/// [`compress_zlib`](root_compress::compress_zlib). Does not return an error.
+/// [`compress_zlib`](anvil_compress::compress_zlib). Does not return an error.
 /// Dimensions are written as stored and are not clamped.
 pub fn encode_png(image: &Image) -> Vec<u8> {
     let mut out = Vec::new();
@@ -543,7 +543,7 @@ pub fn encode_png(image: &Image) -> Vec<u8> {
 
 /// Append one PNG chunk: big-endian length, `kind`, `data`, then CRC-32 of type and data.
 ///
-/// The CRC is [`crc32`](root_compress::crc32) over the bytes written after the length
+/// The CRC is [`crc32`](anvil_compress::crc32) over the bytes written after the length
 /// field. `kind` is the four-byte chunk type, such as `b"IHDR"`.
 fn write_png_chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
     out.extend_from_slice(&(data.len() as u32).to_be_bytes());
@@ -2158,7 +2158,7 @@ pub fn encode_ico(image: &Image) -> Vec<u8> {
 /// width-minus-one and height-minus-one as 24-bit little-endian values. A zero
 /// side is treated as 1 before the subtraction. The second chunk is `RGBA`: a
 /// little-endian length and the raw [`Image::pixels`] bytes zlib-wrapped by
-/// [`compress_zlib`](root_compress::compress_zlib). An odd-sized payload is padded
+/// [`compress_zlib`](anvil_compress::compress_zlib). An odd-sized payload is padded
 /// with one zero byte so the next chunk would stay even-aligned. Does not return
 /// an error. [`decode_webp`] is the matching reader.
 pub fn encode_webp(image: &Image) -> Vec<u8> {
@@ -2211,7 +2211,7 @@ pub fn encode_webp(image: &Image) -> Vec<u8> {
 /// height-minus-one. The `VP8L` transform data after those bits is not decoded.
 ///
 /// Pixels come only from an `RGBA` chunk, inflated with
-/// [`decompress_zlib_bounded`](root_compress::decompress_zlib_bounded) to exactly
+/// [`decompress_zlib_bounded`](anvil_compress::decompress_zlib_bounded) to exactly
 /// `width * height * 4` bytes and checked by [`Image::from_rgba`]. Missing that
 /// chunk returns [`ImageError::UnsupportedFormat`], including ordinary lossy `VP8`
 /// files. A short chunk is [`ImageError::UnexpectedEof`]. A bad `VP8L` signature
