@@ -1,6 +1,6 @@
-//! PNG, JPEG, GIF89a, WebP, ICO, BMP, and Netpbm image decoder, encoder, and resampler (Proof of Concept).
+//! PNG, JPEG, GIF, WebP, ICO, BMP, and PPM, decoded to 8-bit RGBA.
 //!
-//! Standalone `MPL-2.0` companion library for the Flux Browser Proof of Concept ecosystem.
+//! PNG chunk checksums are checked. Oversized images are rejected. Depends on `flux-compress`.
 
 use std::fmt;
 

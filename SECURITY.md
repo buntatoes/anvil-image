@@ -1,35 +1,19 @@
-# Security Policy
+# Security
 
-## Proof of Concept (PoC) Notice
+Report problems in private:
 
-`flux-image` is a standalone **Proof of Concept (PoC)** raster image decoder, encoder, and bilinear resampler (`PNG`, `JPEG`, `GIF89a`, `WebP`, `ICO`, `BMP`, `PPM/PGM`) built from scratch as part of the [**Flux Browser**](https://github.com/buntatoes/flux-browser) engine ecosystem.
+https://github.com/buntatoes/flux-image/security/advisories/new
 
----
+The browser repository takes the same kind of report:
 
-## Supported Versions
+https://github.com/buntatoes/flux-browser/security/advisories/new
 
-| Version | Supported |
-| :--- | :---: |
-| `v.04` (Latest) | Yes |
-| `< v.04` | No |
+Do not put the details in a public issue.
 
----
+## What is checked
 
-## Reporting a Vulnerability
+- Width and height must be non-zero, at most 8192 on a side, and at most 16,777,216 pixels.
+- PNG chunk checksums are checked. A bad checksum is rejected.
+- PNG and WebP decompression goes through `flux-compress`, which stops if the inflated stream is too large.
 
-Please **do not** report security vulnerabilities through public GitHub issues or pull requests.
-
-- **GitHub Private Vulnerability Reporting (Recommended)**: [`https://github.com/buntatoes/flux-image/security/advisories/new`](https://github.com/buntatoes/flux-image/security/advisories/new)
-- **Central Ecosystem Security Portal**: [`https://github.com/buntatoes/flux-browser/security/advisories/new`](https://github.com/buntatoes/flux-browser/security/advisories/new)
-- **Author Attribution**: **Buntos** ([@buntatoes](https://github.com/buntatoes) · `Buntos <324143321+buntatoes@users.noreply.github.com>`)
-
-*(Note: `324143321+buntatoes@users.noreply.github.com` is a GitHub privacy `noreply` commit-attribution address and does not accept direct inbound email; please use GitHub Private Vulnerability Reporting above to contact the maintainer privately.)*
-
----
-
-## Security Controls in `flux-image`
-
-- **Pre-Allocation Dimension & Pixel-Count Guard (`validate_dimensions`)**:
-  - Enforces `MAX_IMAGE_DIMENSION = 8192` and `MAX_IMAGE_PIXELS = 16,777,216` (`64 MiB` RGBA8888 ceiling) before allocating any pixel buffer across PNG, JPEG, GIF, WebP, ICO, BMP, and Netpbm formats.
-- **Bounded Zlib & LZW Expansion**:
-  - Bounds compressed PNG `IDAT` and WebP chunks via `flux-compress::decompress_zlib_bounded` and enforces 12-bit LZW dictionary bounds in GIF decoding.
+Version 0.4.1 is current.
