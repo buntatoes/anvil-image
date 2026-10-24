@@ -1,6 +1,11 @@
+# Still-image decode, encode, and bilinear resample. PNG IDAT uses flux-compress.
+# Caps: 8192 px per side and 16,777,216 pixels.
+# Callers: flux-layout (intrinsic img size), flux-raster (pixel sample),
+# flux-browser (decode_auto on page images). CPU only.
+
 [package]
 name = "flux-image"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
 authors = ["Buntos <324143321+buntatoes@users.noreply.github.com>"]
 license = "MPL-2.0"
@@ -10,6 +15,7 @@ homepage = "https://github.com/buntatoes/flux-image"
 readme = "README.md"
 keywords = ["png", "jpeg", "webp", "image"]
 categories = ["multimedia::images", "rendering::data-formats"]
+publish = false
 
 [dependencies]
 flux-compress = { path = "../flux-compress" }

@@ -2,7 +2,7 @@
   <h1>flux-image</h1>
   <p>PNG, JPEG, GIF, WebP, ICO, BMP, and PPM.</p>
   <p>
-    <img src="https://img.shields.io/badge/release-v.04.1-e8c37a?style=flat-square" alt="v.04.1" />
+    <img src="https://img.shields.io/badge/release-v.05-e8c37a?style=flat-square" alt="v.05" />
     <img src="https://img.shields.io/badge/status-Proof_of_Concept-d4a359?style=flat-square" alt="Proof of Concept" />
     <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MPL--2.0-blue?style=flat-square" alt="MPL-2.0" /></a>
     <a href="./SECURITY.md"><img src="https://img.shields.io/badge/security-policy-2ea44f?style=flat-square" alt="Security" /></a>
@@ -10,7 +10,7 @@
   </p>
 </div>
 
-Version 0.4.1.
+Version 0.5.0.
 
 It needs [flux-compress](https://github.com/buntatoes/flux-compress) in the directory next to this one.
 
