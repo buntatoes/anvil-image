@@ -13,6 +13,10 @@ use anvil_image::{
     encode_jpeg, encode_png, encode_ppm, encode_webp,
 };
 
+mod webp_fixtures {
+    include!("fixtures/webp.rs");
+}
+
 // ---- shared harness (same text in each repo's robustness test) ----
 
 use std::sync::mpsc;
@@ -296,6 +300,85 @@ fn lossless_formats_round_trip() {
         let gif = decode_gif(&encode_gif(&image)).expect("GIF encoder output decodes");
         assert_eq!((gif.width, gif.height), (image.width, image.height));
     });
+}
+
+/// WebP files from a stock encoder: lossless, lossy, and lossy with alpha.
+const REAL_WEBP: &[&[u8]] = &[
+    webp_fixtures::LOSSLESS_PREDICT_CROSS_CACHE,
+    webp_fixtures::LOSSLESS_PALETTE_2,
+    webp_fixtures::LOSSLESS_PALETTE_11,
+    webp_fixtures::LOSSLESS_SUBTRACT_GREEN,
+    webp_fixtures::LOSSLESS_META_CODES,
+    webp_fixtures::LOSSY_ALL_MODES,
+    webp_fixtures::LOSSY_SIMPLE_FILTER,
+    webp_fixtures::LOSSY_ALPHA_GRADIENT,
+    webp_fixtures::LOSSY_ALPHA_VERTICAL,
+];
+
+#[test]
+fn real_webp_files_decode() {
+    for (i, file) in REAL_WEBP.iter().enumerate() {
+        let image = decode_auto(file).unwrap_or_else(|e| panic!("file {i}: {e}"));
+        check_image(&image);
+    }
+}
+
+#[test]
+fn mutated_real_webp_does_not_panic() {
+    run_cases("image-webp-real", 28, |rng| {
+        let file = rng.pick(REAL_WEBP);
+        mutate(rng, file)
+    }, decode_everything);
+}
+
+/// Change bytes inside the bitstream but keep every length field intact, so
+/// the edits reach the entropy decoders instead of stopping at the container.
+#[test]
+fn webp_bitstream_edits_do_not_panic() {
+    run_cases("image-webp-bits", 29, |rng| {
+        let mut file = rng.pick(REAL_WEBP).to_vec();
+        let edits = 1 + rng.below(6);
+        for _ in 0..edits {
+            // The first 20 bytes are the RIFF header and the first chunk header.
+            let i = 20 + rng.below(file.len() - 20);
+            if rng.one_in(2) {
+                file[i] ^= 1 << rng.below(8);
+            } else {
+                file[i] = rng.byte();
+            }
+        }
+        file
+    }, |input| {
+        if let Ok(image) = decode_webp(input) {
+            check_image(&image);
+        }
+    });
+}
+
+#[test]
+fn truncated_real_webp_does_not_panic() {
+    run_cases("image-webp-truncated", 30, |rng| {
+        let file = rng.pick(REAL_WEBP);
+        file[..rng.below(file.len())].to_vec()
+    }, decode_everything);
+}
+
+#[test]
+fn oversized_webp_headers_are_refused() {
+    // Lossless header claiming 16384 x 16384.
+    let mut lossless = b"RIFF\x15\0\0\0WEBPVP8L\x09\0\0\0\x2F".to_vec();
+    lossless.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0x0F, 0, 0, 0, 0, 0]);
+    assert!(matches!(
+        decode_webp(&lossless),
+        Err(anvil_image::ImageError::DimensionsTooLarge { .. })
+    ));
+    // Lossy key frame header claiming 16383 x 16383.
+    let mut lossy = b"RIFF\x18\0\0\0WEBPVP8 \x0C\0\0\0".to_vec();
+    lossy.extend_from_slice(&[0x50, 0, 0, 0x9D, 0x01, 0x2A, 0xFF, 0x3F, 0xFF, 0x3F, 0, 0]);
+    assert!(matches!(
+        decode_webp(&lossy),
+        Err(anvil_image::ImageError::DimensionsTooLarge { .. })
+    ));
 }
 
 #[test]
