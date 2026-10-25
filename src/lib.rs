@@ -16,10 +16,10 @@
 //! * GIF: `GIF87a` and `GIF89a`. The first image descriptor is LZW-decoded,
 //!   including a local or global palette, a graphic-control transparent index,
 //!   and the four-pass interlace. Later frames are not composited.
-//! * WebP: a RIFF `WEBP` container. Pixels are taken only from a zlib-compressed
-//!   `RGBA` chunk written by [`encode_webp`]. `VP8X` and the `VP8L` header supply
-//!   width and height. Lossy `VP8` and a real `VP8L` transform bitstream are not
-//!   decoded.
+//! * WebP: a RIFF `WEBP` container, simple or with a `VP8X` header. Lossless
+//!   `VP8L` bitstreams are decoded in full, as is the zlib `RGBA` chunk that
+//!   [`encode_webp`] writes. Lossy `VP8 ` is not decoded yet. Animated files
+//!   are rejected.
 //! * ICO and CUR: a directory with type 1 or 2. The largest entry is decoded,
 //!   either as an embedded PNG or as a 24-bit or 32-bit DIB. The AND mask is not applied.
 //! * BMP: uncompressed (`BI_RGB`) or `BI_BITFIELDS` files at 24 or 32 bits per
@@ -45,6 +45,8 @@
 use std::fmt;
 
 use anvil_compress::{CompressError, compress_zlib, crc32, decompress_zlib_bounded};
+
+mod webp;
 
 /// Eight-byte PNG signature. Compared in full before any chunk is read.
 const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -2235,85 +2237,26 @@ pub fn encode_webp(image: &Image) -> Vec<u8> {
     out
 }
 
-/// Decode a RIFF `WEBP` file produced by [`encode_webp`], or one with the same `RGBA` chunk.
+/// Decode a RIFF `WEBP` file into RGBA.
 ///
 /// Requires `RIFF` at byte 0 and `WEBP` at byte 8. Each chunk is a 4-byte FourCC,
 /// a little-endian length, that many payload bytes, and one pad byte when the
-/// length is odd. `VP8X` must hold at least 10 bytes; width and height are the
-/// 24-bit little-endian fields at payload offsets 4 and 7, plus one. A `VP8L`
-/// chunk is used only when it has at least 5 bytes and starts with signature
-/// `0x2F`: the next 14 bits are width-minus-one and the following 14 are
-/// height-minus-one. The `VP8L` transform data after those bits is not decoded.
+/// length is odd. The walk stops at the end of the RIFF payload.
 ///
-/// Pixels come only from an `RGBA` chunk, inflated with
+/// Pixels come from the first `VP8L` chunk (the lossless bitstream, with all four
+/// transforms, the color cache, and meta prefix codes). A `VP8X` header may come
+/// first; its canvas size must match the bitstream. A file with no bitstream chunk
+/// but an `RGBA` chunk, as written by [`encode_webp`], is inflated with
 /// [`decompress_zlib_bounded`](anvil_compress::decompress_zlib_bounded) to exactly
-/// `width * height * 4` bytes and checked by [`Image::from_rgba`]. Missing that
-/// chunk returns [`ImageError::UnsupportedFormat`], including ordinary lossy `VP8`
-/// files. A short chunk is [`ImageError::UnexpectedEof`]. A bad `VP8L` signature
-/// or a zero size after the walk is [`ImageError::InvalidHeader`]. Dimensions are
-/// checked with [`validate_dimensions`] both when a header is seen and again
-/// before inflate.
+/// `width * height * 4` bytes using the `VP8X` size.
+///
+/// Animated files are [`ImageError::UnsupportedFormat`], as are lossy `VP8 `
+/// chunks for now. A short chunk or bitstream is [`ImageError::UnexpectedEof`].
+/// A bad signature, prefix code, transform, or back reference is
+/// [`ImageError::InvalidHeader`]. Sizes are checked with [`validate_dimensions`]
+/// before any pixel buffer is allocated.
 pub fn decode_webp(bytes: &[u8]) -> Result<Image, ImageError> {
-    if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WEBP" {
-        return Err(ImageError::InvalidHeader("missing RIFF WEBP header"));
-    }
-    let mut pos = 12usize;
-    let mut width = 0u32;
-    let mut height = 0u32;
-    let mut rgba_chunk: Option<&[u8]> = None;
-
-    while pos + 8 <= bytes.len() {
-        let fourcc = &bytes[pos..pos + 4];
-        let chunk_len = u32::from_le_bytes([
-            bytes[pos + 4],
-            bytes[pos + 5],
-            bytes[pos + 6],
-            bytes[pos + 7],
-        ]) as usize;
-        pos += 8;
-        // The payload must fit. The even pad is applied after the payload is copied.
-        if pos + chunk_len > bytes.len() {
-            return Err(ImageError::UnexpectedEof);
-        }
-        let payload = &bytes[pos..pos + chunk_len];
-        if fourcc == b"VP8X" {
-            if payload.len() < 10 {
-                return Err(ImageError::InvalidHeader("truncated VP8X chunk"));
-            }
-            let w_minus_1 = u32::from(payload[4])
-                | (u32::from(payload[5]) << 8)
-                | (u32::from(payload[6]) << 16);
-            let h_minus_1 = u32::from(payload[7])
-                | (u32::from(payload[8]) << 8)
-                | (u32::from(payload[9]) << 16);
-            width = w_minus_1 + 1;
-            height = h_minus_1 + 1;
-            validate_dimensions(width, height)?;
-        } else if fourcc == b"VP8L" && payload.len() >= 5 {
-            // Only the 14-bit width and height fields are read. The bitstream is not.
-            if payload[0] != 0x2F {
-                return Err(ImageError::InvalidHeader("invalid VP8L signature"));
-            }
-            let bits = u32::from_le_bytes([payload[1], payload[2], payload[3], payload[4]]);
-            width = (bits & 0x3FFF) + 1;
-            height = ((bits >> 14) & 0x3FFF) + 1;
-            validate_dimensions(width, height)?;
-        } else if fourcc == b"RGBA" {
-            rgba_chunk = Some(payload);
-        }
-        // Odd payloads are followed by one pad byte that is not included in `chunk_len`.
-        pos += chunk_len + (chunk_len % 2);
-    }
-
-    validate_dimensions(width, height)?;
-    let expected = (width as usize) * (height as usize) * 4;
-    if let Some(compressed) = rgba_chunk {
-        let pixels = decompress_zlib_bounded(compressed, expected)?;
-        return Image::from_rgba(width, height, pixels);
-    }
-    Err(ImageError::UnsupportedFormat(
-        "WebP stream requires lossless RGBA chunk",
-    ))
+    webp::decode(bytes)
 }
 
 /// In-memory round trips for each encoder and decoder, plus the dimension cap.
