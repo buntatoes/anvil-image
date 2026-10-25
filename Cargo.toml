@@ -1,7 +1,7 @@
 # Still-image decode, encode, and bilinear resample. PNG IDAT uses anvil-compress.
 # Caps: 8192 px per side and 16,777,216 pixels.
-# Callers: anvil-layout (intrinsic img size), anvil-raster (pixel sample),
-# anvil-browser (decode_auto on page images). CPU only.
+# Callers: anvil-layout (intrinsic img size) and anvil-raster (pixel sample),
+# both in anvil-engine, and anvil-browser (decode_auto on page images). CPU only.
 
 [package]
 name = "anvil-image"
