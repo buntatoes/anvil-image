@@ -998,6 +998,20 @@ pub(crate) fn decode(data: &[u8]) -> Result<(u32, u32, Vec<u32>), ImageError> {
     Ok((width, height, pixels))
 }
 
+/// Decode a header-less image stream of known size, as stored in an `ALPH` chunk.
+pub(crate) fn decode_headerless(
+    data: &[u8],
+    width: u32,
+    height: u32,
+) -> Result<Vec<u32>, ImageError> {
+    crate::validate_dimensions(width, height)?;
+    let mut decoder = Decoder {
+        br: BitReader::new(data),
+        table_entries: 0,
+    };
+    decoder.decode_image_stream(width as usize, height as usize)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

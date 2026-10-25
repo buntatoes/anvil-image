@@ -256,3 +256,125 @@ fn truncated_lossy_files_are_errors() {
         assert!(decode(&file).is_err(), "kept {keep} bytes");
     }
 }
+
+#[test]
+fn lossy_alpha_matches_the_reference_decoder() {
+    let cases: [(&[u8], u64, u64, &[Spot]); 2] = [
+        (
+            LOSSY_ALPHA_GRADIENT,
+            LOSSY_ALPHA_GRADIENT_YUV_FNV,
+            LOSSY_ALPHA_GRADIENT_ALPHA_FNV,
+            LOSSY_ALPHA_GRADIENT_SPOTS,
+        ),
+        (
+            LOSSY_ALPHA_VERTICAL,
+            LOSSY_ALPHA_VERTICAL_YUV_FNV,
+            LOSSY_ALPHA_VERTICAL_ALPHA_FNV,
+            LOSSY_ALPHA_VERTICAL_SPOTS,
+        ),
+    ];
+    for (i, (file, yuv_hash, alpha_hash, spots)) in cases.into_iter().enumerate() {
+        let frame = vp8::decode(chunk(file, b"VP8 ").unwrap()).unwrap();
+        assert_eq!(fnv1a(&packed_planes(&frame)), yuv_hash, "case {i}");
+        let image = decode_auto(file).unwrap();
+        let alpha: Vec<u8> = image.pixels.chunks(4).map(|p| p[3]).collect();
+        assert_eq!(fnv1a(&alpha), alpha_hash, "case {i}");
+        check_spots(&image, spots);
+    }
+}
+
+#[test]
+fn alpha_filters_undo_their_predictions() {
+    // 3x3 alpha plane 10, 20, 30 / 40, 50, 60 / 70, 80, 90.
+    let plane: Vec<u8> = (1..=9).map(|v| v * 10).collect();
+    // Horizontal: left neighbor, or the pixel above in the first column.
+    let horizontal = [10u8, 10, 10, 30, 10, 10, 30, 10, 10];
+    // Vertical: pixel above, or left neighbor in the first row.
+    let vertical = [10u8, 10, 10, 30, 30, 30, 30, 30, 30];
+    // Gradient: clamp(left + above - corner).
+    let gradient = [10u8, 10, 10, 30, 0, 0, 30, 0, 0];
+    for (filter, deltas) in [(1u8, horizontal), (2, vertical), (3, gradient)] {
+        let mut data = deltas.to_vec();
+        unfilter_alpha(&mut data, 3, 3, filter);
+        assert_eq!(data, plane, "filter {filter}");
+    }
+    // Wrapping arithmetic, not saturating.
+    let mut wrap = vec![200u8, 100];
+    unfilter_alpha(&mut wrap, 2, 1, 1);
+    assert_eq!(wrap, vec![200, 44]);
+}
+
+#[test]
+fn raw_alpha_chunks_apply_with_each_filter() {
+    let payload = chunk(LOSSY_SIMPLE_FILTER, b"VP8 ").unwrap();
+    let (w, h) = (40u32, 24u32);
+    let wanted: Vec<u8> = (0..w * h).map(|i| ((i * 7) % 256) as u8).collect();
+    let base = decode(LOSSY_SIMPLE_FILTER).unwrap();
+    for filter in 0..4u8 {
+        // Build the filtered deltas by predicting from the wanted plane.
+        let mut alph = vec![filter << 2];
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let i = y * w as usize + x;
+                let left = (x > 0).then(|| wanted[i - 1]);
+                let above = (y > 0).then(|| wanted[i - w as usize]);
+                let prediction = match (filter, left, above) {
+                    (0, _, _) | (_, None, None) => 0,
+                    (_, Some(l), None) => l,
+                    (_, None, Some(a)) => a,
+                    (1, Some(l), Some(_)) => l,
+                    (2, Some(_), Some(a)) => a,
+                    (_, Some(l), Some(a)) => {
+                        let c = wanted[i - w as usize - 1];
+                        (i32::from(l) + i32::from(a) - i32::from(c)).clamp(0, 255) as u8
+                    }
+                };
+                alph.push(wanted[i].wrapping_sub(prediction));
+            }
+        }
+        let file = riff(&[
+            (b"VP8X", &vp8x(0x10, w, h)),
+            (b"ALPH", &alph),
+            (b"VP8 ", payload),
+        ]);
+        let image = decode(&file).unwrap();
+        for (i, (got, plain)) in image
+            .pixels
+            .chunks(4)
+            .zip(base.pixels.chunks(4))
+            .enumerate()
+        {
+            assert_eq!(got[3], wanted[i], "filter {filter}, pixel {i}");
+            assert_eq!(&got[..3], &plain[..3]);
+        }
+    }
+}
+
+#[test]
+fn bad_alpha_chunks_are_errors() {
+    let payload = chunk(LOSSY_SIMPLE_FILTER, b"VP8 ").unwrap();
+    let short_raw = riff(&[
+        (b"VP8X", &vp8x(0x10, 40, 24)),
+        (b"ALPH", &[0, 1, 2, 3]),
+        (b"VP8 ", payload),
+    ]);
+    assert_eq!(decode(&short_raw), Err(ImageError::UnexpectedEof));
+    let empty = riff(&[
+        (b"VP8X", &vp8x(0x10, 40, 24)),
+        (b"ALPH", &[]),
+        (b"VP8 ", payload),
+    ]);
+    assert_eq!(decode(&empty), Err(ImageError::UnexpectedEof));
+    let method = riff(&[
+        (b"VP8X", &vp8x(0x10, 40, 24)),
+        (b"ALPH", &[2; 961]),
+        (b"VP8 ", payload),
+    ]);
+    assert!(matches!(decode(&method), Err(ImageError::InvalidHeader(_))));
+    let lossless = riff(&[
+        (b"VP8X", &vp8x(0x10, 40, 24)),
+        (b"ALPH", &[1, 0xFF, 0xFF]),
+        (b"VP8 ", payload),
+    ]);
+    assert!(decode(&lossless).is_err());
+}
