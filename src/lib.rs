@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+// Copyright (c) 2026 Buntato
 //! CPU image codecs that expand still pictures to 8-bit RGBA.
 //!
 //! Decoders accept these containers, and nothing else:
@@ -1367,20 +1369,41 @@ impl<'a> JpegBitReader<'a> {
     }
 }
 
+/// Largest DC difference category in an 8-bit baseline scan.
+const JPEG_MAX_DC_CATEGORY: u8 = 11;
+/// Largest AC coefficient size in an 8-bit baseline scan.
+const JPEG_MAX_AC_CATEGORY: u8 = 10;
+
 /// Sign-extend a JPEG magnitude category.
 ///
 /// `category` is the bit count. `bits` is the unsigned value just read. Category
 /// 0 returns 0. Values below `1 << (category - 1)` are negative: `bits - (2^category - 1)`.
-fn receive_extend(bits: u16, category: u8) -> i32 {
+/// A category above `max` (11 for DC, 10 for AC in an 8-bit baseline scan) comes
+/// from a corrupt Huffman table and is [`ImageError::InvalidHeader`], as are
+/// `bits` that do not fit in `category` bits.
+fn receive_extend(bits: u16, category: u8, max: u8) -> Result<i32, ImageError> {
     if category == 0 {
-        return 0;
+        return Ok(0);
     }
-    let half = 1u16 << (category - 1);
-    if bits < half {
-        i32::from(bits) - i32::from((1u16 << category) - 1)
+    if category > max || category > 15 {
+        return Err(ImageError::InvalidHeader(
+            "JPEG coefficient category out of range",
+        ));
+    }
+    let span = 1u32 << category;
+    let bits = u32::from(bits);
+    if bits >= span {
+        return Err(ImageError::InvalidHeader(
+            "JPEG coefficient bits out of range",
+        ));
+    }
+    let half = span >> 1;
+    let value = if bits < half {
+        bits as i32 - (span - 1) as i32
     } else {
-        i32::from(bits)
-    }
+        bits as i32
+    };
+    Ok(value)
 }
 
 /// Decode a baseline `SOF0` JPEG from `bytes` into opaque RGBA.
@@ -1648,9 +1671,16 @@ fn decode_jpeg_scan(
                 let mut blocks = Vec::with_capacity(blocks_count);
                 for _ in 0..blocks_count {
                     let dc_cat = reader.decode_huff(&dc_huff[comp.dc_table as usize])?;
+                    if dc_cat > JPEG_MAX_DC_CATEGORY {
+                        return Err(ImageError::InvalidHeader(
+                            "JPEG coefficient category out of range",
+                        ));
+                    }
                     let dc_bits = reader.read_bits(dc_cat)?;
-                    let diff = receive_extend(dc_bits, dc_cat);
-                    prev_dc[ci] += diff;
+                    let diff = receive_extend(dc_bits, dc_cat, JPEG_MAX_DC_CATEGORY)?;
+                    prev_dc[ci] = prev_dc[ci]
+                        .checked_add(diff)
+                        .ok_or(ImageError::InvalidHeader("JPEG DC value out of range"))?;
 
                     let mut zz = [0i32; 64];
                     zz[0] = prev_dc[ci];
@@ -1670,8 +1700,13 @@ fn decode_jpeg_scan(
                         if k >= 64 {
                             break;
                         }
+                        if size > JPEG_MAX_AC_CATEGORY {
+                            return Err(ImageError::InvalidHeader(
+                                "JPEG coefficient category out of range",
+                            ));
+                        }
                         let ac_bits = reader.read_bits(size)?;
-                        zz[k] = receive_extend(ac_bits, size);
+                        zz[k] = receive_extend(ac_bits, size, JPEG_MAX_AC_CATEGORY)?;
                         k += 1;
                     }
 
@@ -2383,5 +2418,112 @@ mod tests {
                 height: 20000
             })
         ));
+    }
+
+    /// Rewrite every symbol of the Huffman tables of one class (0 = DC,
+    /// 1 = AC) in a JPEG to `symbol`, leaving the code lengths alone.
+    fn with_huffman_symbols(jpeg: &[u8], class: u8, symbol: u8) -> Vec<u8> {
+        let mut out = jpeg.to_vec();
+        let mut pos = 2;
+        let mut changed = 0;
+        while pos + 4 <= out.len() && out[pos] == 0xFF {
+            let marker = out[pos + 1];
+            let len = usize::from(u16::from_be_bytes([out[pos + 2], out[pos + 3]]));
+            if marker == 0xDA {
+                break;
+            }
+            if marker == 0xC4 {
+                let end = pos + 2 + len;
+                let mut t = pos + 4;
+                while t + 17 <= end {
+                    let table_class = out[t] >> 4;
+                    let count: usize = out[t + 1..t + 17].iter().map(|&n| usize::from(n)).sum();
+                    if table_class == class {
+                        for b in &mut out[t + 17..t + 17 + count] {
+                            *b = symbol;
+                        }
+                        changed += 1;
+                    }
+                    t += 17 + count;
+                }
+            }
+            pos += 2 + len;
+        }
+        assert!(changed > 0, "no Huffman table of class {class} found");
+        out
+    }
+
+    fn sample_jpeg() -> Vec<u8> {
+        let mut img = Image::new(16, 16);
+        for y in 0..16 {
+            for x in 0..16 {
+                img.set_pixel(
+                    x,
+                    y,
+                    [(x * 15) as u8, (y * 15) as u8, ((x + y) * 7) as u8, 255],
+                );
+            }
+        }
+        encode_jpeg(&img)
+    }
+
+    #[test]
+    fn receive_extend_checks_its_category() {
+        assert_eq!(receive_extend(0, 0, 11).unwrap(), 0);
+        assert_eq!(receive_extend(0, 1, 11).unwrap(), -1);
+        assert_eq!(receive_extend(1, 1, 11).unwrap(), 1);
+        assert_eq!(receive_extend(0, 11, 11).unwrap(), -2047);
+        assert_eq!(receive_extend(2047, 11, 11).unwrap(), 2047);
+        assert!(receive_extend(0, 12, 11).is_err());
+        assert!(receive_extend(0, 11, 10).is_err());
+        assert!(receive_extend(0, 16, 255).is_err());
+        assert!(receive_extend(0, 255, 255).is_err());
+        assert!(receive_extend(4, 2, 11).is_err());
+    }
+
+    #[test]
+    fn jpeg_with_out_of_range_dc_category_is_an_error() {
+        let jpeg = sample_jpeg();
+        assert!(decode_jpeg(&jpeg).is_ok());
+        for symbol in [12u8, 15, 16, 17, 31, 200, 255] {
+            let bad = with_huffman_symbols(&jpeg, 0, symbol);
+            assert!(
+                matches!(decode_jpeg(&bad), Err(ImageError::InvalidHeader(_))),
+                "DC symbol {symbol} was not rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn jpeg_with_out_of_range_ac_size_is_an_error() {
+        let jpeg = sample_jpeg();
+        for symbol in [0x0Bu8, 0x0F, 0x1F, 0xEF] {
+            let bad = with_huffman_symbols(&jpeg, 1, symbol);
+            assert!(
+                matches!(decode_jpeg(&bad), Err(ImageError::InvalidHeader(_))),
+                "AC symbol {symbol:#04x} was not rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn mutated_jpegs_do_not_panic() {
+        let jpeg = sample_jpeg();
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for _ in 0..3000 {
+            let mut bad = jpeg.clone();
+            let flips = 1 + (next() % 8) as usize;
+            for _ in 0..flips {
+                let at = (next() % bad.len() as u64) as usize;
+                bad[at] = next() as u8;
+            }
+            let _ = decode_auto(&bad);
+        }
     }
 }

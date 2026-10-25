@@ -2,7 +2,7 @@
   <h1>anvil-image</h1>
   <p>PNG, JPEG, GIF, WebP, ICO, BMP, and PPM.</p>
   <p>
-    <img src="https://img.shields.io/badge/release-v.05-e8c37a?style=flat-square" alt="v.05" />
+    <img src="https://img.shields.io/badge/release-v.06-e8c37a?style=flat-square" alt="v.06" />
     <img src="https://img.shields.io/badge/status-Proof_of_Concept-d4a359?style=flat-square" alt="Proof of Concept" />
     <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MPL--2.0-blue?style=flat-square" alt="MPL-2.0" /></a>
     <a href="./SECURITY.md"><img src="https://img.shields.io/badge/security-policy-2ea44f?style=flat-square" alt="Security" /></a>
@@ -10,7 +10,7 @@
   </p>
 </div>
 
-Version 0.5.0.
+Version 0.6.0.
 
 It needs [anvil-compress](https://github.com/buntatoes/anvil-compress) in the directory next to this one.
 
@@ -18,9 +18,9 @@ It needs [anvil-compress](https://github.com/buntatoes/anvil-compress) in the di
 
 - `decode_auto` picks a decoder from the file header: PNG, baseline JPEG, GIF, WebP, ICO, BMP, or PPM/PGM.
 - PNG is 8-bit, not interlaced. Color types are gray, RGB, palette, gray+alpha, and RGBA. Each chunk checksum is checked before the chunk is used.
-- JPEG is baseline (`SOF0`), gray or YCbCr.
+- JPEG is baseline (`SOF0`), gray or YCbCr. A coefficient category outside the 8-bit baseline range is an error, not a guess.
 - GIF reads a color table, transparency, interlacing, and LZW.
-- WebP reads a RIFF container. ICO picks one image from the directory. BMP is uncompressed 24-bit or 32-bit. PPM/PGM is the binary Netpbm form.
+- WebP reads the RIFF container that `encode_webp` writes: a `VP8X` header and a zlib `RGBA` chunk. Lossy (`VP8 `) and lossless (`VP8L`) bitstreams are not decoded and are reported as unsupported. ICO picks one image from the directory. BMP is uncompressed 24-bit or 32-bit. PPM/PGM is the binary Netpbm form.
 - `encode_png`, `encode_jpeg`, `encode_gif`, `encode_webp`, `encode_ico`, `encode_bmp`, and `encode_ppm` write those formats back.
 - `resize_bilinear` scales an image.
 
@@ -53,4 +53,4 @@ The browser is [anvil-browser](https://github.com/buntatoes/anvil-browser) (Apac
 
 ## License
 
-MPL-2.0. Copyright (c) 2026 Buntos.
+MPL-2.0. Copyright (c) 2026 Buntato.
