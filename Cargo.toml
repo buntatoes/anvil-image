@@ -5,7 +5,7 @@
 
 [package]
 name = "anvil-image"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 authors = ["Buntato <324143321+buntatoes@users.noreply.github.com>"]
 license = "MPL-2.0"

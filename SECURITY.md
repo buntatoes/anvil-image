@@ -16,4 +16,4 @@ Do not put the details in a public issue.
 - PNG chunk checksums are checked. A bad checksum is rejected.
 - PNG and WebP decompression goes through `anvil-compress`, which stops if the inflated stream is too large.
 
-Version 0.5.0 is current.
+Version 0.7.0 is current.
