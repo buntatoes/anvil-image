@@ -17,9 +17,9 @@
 //!   including a local or global palette, a graphic-control transparent index,
 //!   and the four-pass interlace. Later frames are not composited.
 //! * WebP: a RIFF `WEBP` container, simple or with a `VP8X` header. Lossless
-//!   `VP8L` bitstreams are decoded in full, as is the zlib `RGBA` chunk that
-//!   [`encode_webp`] writes. Lossy `VP8 ` is not decoded yet. Animated files
-//!   are rejected.
+//!   `VP8L` bitstreams and lossy `VP8 ` key frames are decoded in full, as is
+//!   the zlib `RGBA` chunk that [`encode_webp`] writes. Alpha on lossy images
+//!   is not read yet. Animated files are rejected.
 //! * ICO and CUR: a directory with type 1 or 2. The largest entry is decoded,
 //!   either as an embedded PNG or as a 24-bit or 32-bit DIB. The AND mask is not applied.
 //! * BMP: uncompressed (`BI_RGB`) or `BI_BITFIELDS` files at 24 or 32 bits per
@@ -2244,15 +2244,17 @@ pub fn encode_webp(image: &Image) -> Vec<u8> {
 /// length is odd. The walk stops at the end of the RIFF payload.
 ///
 /// Pixels come from the first `VP8L` chunk (the lossless bitstream, with all four
-/// transforms, the color cache, and meta prefix codes). A `VP8X` header may come
-/// first; its canvas size must match the bitstream. A file with no bitstream chunk
-/// but an `RGBA` chunk, as written by [`encode_webp`], is inflated with
+/// transforms, the color cache, and meta prefix codes) or the first `VP8 ` chunk
+/// (one lossy key frame, converted from 4:2:0 YUV with bilinear chroma upsampling
+/// and BT.601 coefficients; the result is opaque). A `VP8X` header may come first;
+/// its canvas size must match the bitstream. A file with no bitstream chunk but an
+/// `RGBA` chunk, as written by [`encode_webp`], is inflated with
 /// [`decompress_zlib_bounded`](anvil_compress::decompress_zlib_bounded) to exactly
 /// `width * height * 4` bytes using the `VP8X` size.
 ///
-/// Animated files are [`ImageError::UnsupportedFormat`], as are lossy `VP8 `
-/// chunks for now. A short chunk or bitstream is [`ImageError::UnexpectedEof`].
-/// A bad signature, prefix code, transform, or back reference is
+/// Animated files and VP8 interframes are [`ImageError::UnsupportedFormat`]. A
+/// short chunk or bitstream is [`ImageError::UnexpectedEof`]. A bad signature,
+/// start code, prefix code, transform, or back reference is
 /// [`ImageError::InvalidHeader`]. Sizes are checked with [`validate_dimensions`]
 /// before any pixel buffer is allocated.
 pub fn decode_webp(bytes: &[u8]) -> Result<Image, ImageError> {

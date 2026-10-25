@@ -185,3 +185,74 @@ fn unknown_chunks_are_skipped() {
     ]);
     assert_eq!(decode(&file).unwrap(), decode(LOSSLESS_PALETTE_11).unwrap());
 }
+
+/// Y, U, and V planes without macroblock padding, as a reference decoder writes them.
+fn packed_planes(frame: &vp8::Frame) -> Vec<u8> {
+    let (w, h) = (frame.width as usize, frame.height as usize);
+    let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+    let mut out = Vec::with_capacity(w * h + 2 * cw * ch);
+    for y in 0..h {
+        out.extend_from_slice(&frame.y[y * frame.y_stride..y * frame.y_stride + w]);
+    }
+    for plane in [&frame.u, &frame.v] {
+        for y in 0..ch {
+            out.extend_from_slice(&plane[y * frame.uv_stride..y * frame.uv_stride + cw]);
+        }
+    }
+    out
+}
+
+/// A pixel position and the reference decoder's RGBA there.
+type Spot = (u32, u32, [u8; 4]);
+
+/// Every channel within one step of the reference decoder's RGBA.
+fn check_spots(image: &Image, spots: &[Spot]) {
+    for &(x, y, want) in spots {
+        let got = image.pixel(x, y).unwrap();
+        for c in 0..4 {
+            let diff = (i32::from(got[c]) - i32::from(want[c])).abs();
+            assert!(diff <= 1, "pixel {x},{y}: got {got:?}, reference {want:?}");
+        }
+    }
+}
+
+#[test]
+fn lossy_planes_match_the_reference_decoder_exactly() {
+    let cases: [(&[u8], u64, &[Spot]); 2] = [
+        (
+            LOSSY_ALL_MODES,
+            LOSSY_ALL_MODES_YUV_FNV,
+            LOSSY_ALL_MODES_SPOTS,
+        ),
+        (
+            LOSSY_SIMPLE_FILTER,
+            LOSSY_SIMPLE_FILTER_YUV_FNV,
+            LOSSY_SIMPLE_FILTER_SPOTS,
+        ),
+    ];
+    for (i, (file, hash, spots)) in cases.into_iter().enumerate() {
+        let frame = vp8::decode(chunk(file, b"VP8 ").unwrap()).unwrap();
+        assert_eq!(fnv1a(&packed_planes(&frame)), hash, "case {i}");
+        let image = decode_auto(file).unwrap();
+        check_spots(&image, spots);
+        assert!(image.pixels.chunks(4).all(|p| p[3] == 255));
+    }
+}
+
+#[test]
+fn lossy_file_inside_vp8x_decodes() {
+    let payload = chunk(LOSSY_SIMPLE_FILTER, b"VP8 ").unwrap();
+    let file = riff(&[(b"VP8X", &vp8x(0, 40, 24)), (b"VP8 ", payload)]);
+    assert_eq!(decode(&file).unwrap(), decode(LOSSY_SIMPLE_FILTER).unwrap());
+    let wrong = riff(&[(b"VP8X", &vp8x(0, 40, 25)), (b"VP8 ", payload)]);
+    assert!(matches!(decode(&wrong), Err(ImageError::InvalidHeader(_))));
+}
+
+#[test]
+fn truncated_lossy_files_are_errors() {
+    let payload = chunk(LOSSY_ALL_MODES, b"VP8 ").unwrap();
+    for keep in [0, 5, 9, 10, 40, payload.len() / 2, payload.len() - 20] {
+        let file = riff(&[(b"VP8 ", &payload[..keep])]);
+        assert!(decode(&file).is_err(), "kept {keep} bytes");
+    }
+}

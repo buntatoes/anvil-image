@@ -6,17 +6,18 @@
 //! a FourCC, a little-endian payload length, the payload, and one pad byte
 //! when the length is odd. These layouts are read:
 //!
-//! * simple lossy: a single `VP8 ` chunk, recognized but not decoded yet;
+//! * simple lossy: a single `VP8 ` chunk;
 //! * simple lossless: a single `VP8L` chunk;
 //! * extended: a `VP8X` header (flags and canvas size) followed by optional
 //!   metadata chunks and one `VP8 ` or `VP8L` bitstream chunk;
 //! * the layout [`encode_webp`](crate::encode_webp) writes: `VP8X` plus a
 //!   zlib `RGBA` chunk.
 //!
-//! Animated files (`VP8X` animation flag, `ANIM`, or `ANMF`) are
+//! An `ALPH` chunk is not read yet, so lossy images come out opaque. Animated files (`VP8X` animation flag, `ANIM`, or `ANMF`) are
 //! refused with [`ImageError::UnsupportedFormat`]. Metadata chunks (`ICCP`,
 //! `EXIF`, `XMP `) and unknown chunks are skipped.
 
+mod vp8;
 mod vp8l;
 
 use crate::{Image, ImageError, validate_dimensions};
@@ -126,10 +127,10 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Image, ImageError> {
         check_canvas(chunks.canvas, width, height)?;
         return argb_to_image(width, height, &argb);
     }
-    if chunks.vp8.is_some() {
-        return Err(ImageError::UnsupportedFormat(
-            "lossy WebP is not decoded yet",
-        ));
+    if let Some(payload) = chunks.vp8 {
+        let frame = vp8::decode(payload)?;
+        check_canvas(chunks.canvas, frame.width, frame.height)?;
+        return Image::from_rgba(frame.width, frame.height, frame.to_rgba());
     }
     if let (Some(compressed), Some((width, height))) = (chunks.rgba, chunks.canvas) {
         let expected = (width as usize) * (height as usize) * 4;
