@@ -43,7 +43,7 @@ It needs [anvil-compress](https://github.com/buntatoes/anvil-compress) in the di
 cargo test
 ```
 
-Rust 2024 edition, Rust 1.85.1 or newer. The only dependency is `anvil-compress`, by path.
+Rust 2024 edition, Rust 1.99.1 or newer. The only dependency is `anvil-compress`, by path.
 
 ## The other repositories
 
