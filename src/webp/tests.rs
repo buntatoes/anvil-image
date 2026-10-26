@@ -90,7 +90,13 @@ fn encoder_output_still_decodes() {
     let mut image = Image::new(5, 4);
     image.set_pixel(1, 2, [1, 2, 3, 4]);
     image.set_pixel(4, 3, [250, 128, 0, 255]);
-    assert_eq!(decode(&encode_webp(&image)).unwrap(), image);
+    let encoded = encode_webp(&image);
+    assert!(chunk(&encoded, b"VP8L").is_some());
+    assert_eq!(decode(&encoded).unwrap(), image);
+    // Legacy VP8X + zlib RGBA containers still decode.
+
+    let legacy = crate::encode_webp_legacy_rgba(&image);
+    assert_eq!(decode(&legacy).unwrap(), image);
 }
 
 #[test]

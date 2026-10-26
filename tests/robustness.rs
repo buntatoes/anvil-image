@@ -59,7 +59,11 @@ impl Rng {
 
     /// Value in `0..n`. Returns 0 when `n` is 0.
     fn below(&mut self, n: usize) -> usize {
-        if n == 0 { 0 } else { (self.next_u64() % n as u64) as usize }
+        if n == 0 {
+            0
+        } else {
+            (self.next_u64() % n as u64) as usize
+        }
     }
 
     fn byte(&mut self) -> u8 {
@@ -158,7 +162,10 @@ fn check_case(label: &str, case: usize, input: Vec<u8>, target: fn(&[u8])) {
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => {
             let _ = handle.join();
-            panic!("{label}: case {case} panicked on input {}", preview(&shared));
+            panic!(
+                "{label}: case {case} panicked on input {}",
+                preview(&shared)
+            );
         }
         Err(mpsc::RecvTimeoutError::Timeout) => {
             panic!(
@@ -171,7 +178,12 @@ fn check_case(label: &str, case: usize, input: Vec<u8>, target: fn(&[u8])) {
 }
 
 /// Generate cases from `seed` until the budget is spent and check each one.
-fn run_cases(label: &str, seed: u64, mut generate: impl FnMut(&mut Rng) -> Vec<u8>, target: fn(&[u8])) {
+fn run_cases(
+    label: &str,
+    seed: u64,
+    mut generate: impl FnMut(&mut Rng) -> Vec<u8>,
+    target: fn(&[u8]),
+) {
     let mut rng = Rng::new(seed);
     let budget = test_budget();
     let started = Instant::now();
@@ -217,14 +229,23 @@ fn sample_image(rng: &mut Rng) -> Image {
 fn check_image(image: &Image) {
     assert!(image.width <= MAX_IMAGE_DIMENSION && image.height <= MAX_IMAGE_DIMENSION);
     assert!(u64::from(image.width) * u64::from(image.height) <= MAX_IMAGE_PIXELS);
-    assert_eq!(image.pixels.len(), image.width as usize * image.height as usize * 4);
+    assert_eq!(
+        image.pixels.len(),
+        image.width as usize * image.height as usize * 4
+    );
 }
 
 /// Every decoder sees every input, so a header check that lets a foreign
 /// format through still gets exercised.
 fn decode_everything(input: &[u8]) {
     for decode in [
-        decode_auto, decode_png, decode_jpeg, decode_gif, decode_webp, decode_ico, decode_bmp,
+        decode_auto,
+        decode_png,
+        decode_jpeg,
+        decode_gif,
+        decode_webp,
+        decode_ico,
+        decode_bmp,
         decode_ppm,
     ] {
         if let Ok(image) = decode(input) {
@@ -241,65 +262,109 @@ fn mutated_case(rng: &mut Rng, format: (Encoder, Decoder)) -> Vec<u8> {
 #[test]
 fn random_bytes_with_known_signatures_do_not_panic() {
     const SIGNATURES: &[&[u8]] = &[
-        b"\x89PNG\r\n\x1a\n", b"\xFF\xD8", b"GIF89a", b"GIF87a", b"RIFF\0\0\0\0WEBP",
-        b"\0\0\x01\0", b"\0\0\x02\0", b"BM", b"P6", b"P5", b"",
+        b"\x89PNG\r\n\x1a\n",
+        b"\xFF\xD8",
+        b"GIF89a",
+        b"GIF87a",
+        b"RIFF\0\0\0\0WEBP",
+        b"\0\0\x01\0",
+        b"\0\0\x02\0",
+        b"BM",
+        b"P6",
+        b"P5",
+        b"",
     ];
-    run_cases("image-random", 21, |rng| {
-        let mut input = rng.pick(SIGNATURES).to_vec();
-        input.extend(rng.bytes(200));
-        input
-    }, decode_everything);
+    run_cases(
+        "image-random",
+        21,
+        |rng| {
+            let mut input = rng.pick(SIGNATURES).to_vec();
+            input.extend(rng.bytes(200));
+            input
+        },
+        decode_everything,
+    );
 }
 
 #[test]
 fn mutated_png_does_not_panic() {
-    run_cases("image-png", 22, |rng| mutated_case(rng, PNG), decode_everything);
+    run_cases(
+        "image-png",
+        22,
+        |rng| mutated_case(rng, PNG),
+        decode_everything,
+    );
 }
 
 #[test]
 fn mutated_jpeg_does_not_panic() {
-    run_cases("image-jpeg", 23, |rng| mutated_case(rng, JPEG), decode_everything);
+    run_cases(
+        "image-jpeg",
+        23,
+        |rng| mutated_case(rng, JPEG),
+        decode_everything,
+    );
 }
 
 #[test]
 fn mutated_gif_does_not_panic() {
-    run_cases("image-gif", 24, |rng| mutated_case(rng, GIF), decode_everything);
+    run_cases(
+        "image-gif",
+        24,
+        |rng| mutated_case(rng, GIF),
+        decode_everything,
+    );
 }
 
 #[test]
 fn mutated_webp_ico_bmp_ppm_do_not_panic() {
-    run_cases("image-other", 25, |rng| {
-        let format = rng.pick(&[WEBP, ICO, BMP, PPM]);
-        mutated_case(rng, format)
-    }, decode_everything);
+    run_cases(
+        "image-other",
+        25,
+        |rng| {
+            let format = rng.pick(&[WEBP, ICO, BMP, PPM]);
+            mutated_case(rng, format)
+        },
+        decode_everything,
+    );
 }
 
 #[test]
 fn truncated_files_do_not_panic() {
-    run_cases("image-truncated", 26, |rng| {
-        let format = rng.pick(&[PNG, JPEG, GIF, WEBP, ICO, BMP, PPM]);
-        let mut encoded = (format.0)(&sample_image(rng));
-        let keep = rng.below(encoded.len());
-        encoded.truncate(keep);
-        encoded
-    }, decode_everything);
+    run_cases(
+        "image-truncated",
+        26,
+        |rng| {
+            let format = rng.pick(&[PNG, JPEG, GIF, WEBP, ICO, BMP, PPM]);
+            let mut encoded = (format.0)(&sample_image(rng));
+            let keep = rng.below(encoded.len());
+            encoded.truncate(keep);
+            encoded
+        },
+        decode_everything,
+    );
 }
 
 #[test]
 fn lossless_formats_round_trip() {
-    run_cases("image-round-trip", 27, |rng| {
-        // The test target is a plain fn, so the image travels as PNG bytes.
-        encode_png(&sample_image(rng))
-    }, |png| {
-        let image = decode_png(png).expect("encoder output decodes");
-        check_image(&image);
-        let again = decode_png(&encode_png(&image)).expect("second round decodes");
-        assert_eq!(again, image);
-        let jpeg = decode_jpeg(&encode_jpeg(&image)).expect("JPEG encoder output decodes");
-        assert_eq!((jpeg.width, jpeg.height), (image.width, image.height));
-        let gif = decode_gif(&encode_gif(&image)).expect("GIF encoder output decodes");
-        assert_eq!((gif.width, gif.height), (image.width, image.height));
-    });
+    run_cases(
+        "image-round-trip",
+        27,
+        |rng| {
+            // The test target is a plain fn, so the image travels as PNG bytes.
+            encode_png(&sample_image(rng))
+        },
+        |png| {
+            let image = decode_png(png).expect("encoder output decodes");
+            check_image(&image);
+            let again = decode_png(&encode_png(&image)).expect("second round decodes");
+            assert_eq!(again, image);
+            let jpeg = decode_jpeg(&encode_jpeg(&image)).expect("JPEG encoder output decodes");
+            assert_eq!((jpeg.width, jpeg.height), (image.width, image.height));
+            let gif = decode_gif(&encode_gif(&image)).expect("GIF encoder output decodes");
+            assert_eq!((gif.width, gif.height), (image.width, image.height));
+        },
+    );
 }
 
 /// WebP files from a stock encoder: lossless, lossy, and lossy with alpha.
@@ -325,42 +390,57 @@ fn real_webp_files_decode() {
 
 #[test]
 fn mutated_real_webp_does_not_panic() {
-    run_cases("image-webp-real", 28, |rng| {
-        let file = rng.pick(REAL_WEBP);
-        mutate(rng, file)
-    }, decode_everything);
+    run_cases(
+        "image-webp-real",
+        28,
+        |rng| {
+            let file = rng.pick(REAL_WEBP);
+            mutate(rng, file)
+        },
+        decode_everything,
+    );
 }
 
 /// Change bytes inside the bitstream but keep every length field intact, so
 /// the edits reach the entropy decoders instead of stopping at the container.
 #[test]
 fn webp_bitstream_edits_do_not_panic() {
-    run_cases("image-webp-bits", 29, |rng| {
-        let mut file = rng.pick(REAL_WEBP).to_vec();
-        let edits = 1 + rng.below(6);
-        for _ in 0..edits {
-            // The first 20 bytes are the RIFF header and the first chunk header.
-            let i = 20 + rng.below(file.len() - 20);
-            if rng.one_in(2) {
-                file[i] ^= 1 << rng.below(8);
-            } else {
-                file[i] = rng.byte();
+    run_cases(
+        "image-webp-bits",
+        29,
+        |rng| {
+            let mut file = rng.pick(REAL_WEBP).to_vec();
+            let edits = 1 + rng.below(6);
+            for _ in 0..edits {
+                // The first 20 bytes are the RIFF header and the first chunk header.
+                let i = 20 + rng.below(file.len() - 20);
+                if rng.one_in(2) {
+                    file[i] ^= 1 << rng.below(8);
+                } else {
+                    file[i] = rng.byte();
+                }
             }
-        }
-        file
-    }, |input| {
-        if let Ok(image) = decode_webp(input) {
-            check_image(&image);
-        }
-    });
+            file
+        },
+        |input| {
+            if let Ok(image) = decode_webp(input) {
+                check_image(&image);
+            }
+        },
+    );
 }
 
 #[test]
 fn truncated_real_webp_does_not_panic() {
-    run_cases("image-webp-truncated", 30, |rng| {
-        let file = rng.pick(REAL_WEBP);
-        file[..rng.below(file.len())].to_vec()
-    }, decode_everything);
+    run_cases(
+        "image-webp-truncated",
+        30,
+        |rng| {
+            let file = rng.pick(REAL_WEBP);
+            file[..rng.below(file.len())].to_vec()
+        },
+        decode_everything,
+    );
 }
 
 #[test]

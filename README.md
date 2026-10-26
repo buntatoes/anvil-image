@@ -26,9 +26,9 @@ It needs [anvil-compress](https://github.com/buntatoes/anvil-compress) in the di
   - Alpha on lossy images from an `ALPH` chunk, raw or lossless, with any of its three filters.
   - The simple layout and the extended one with a `VP8X` header. ICC, EXIF, and XMP chunks are skipped, so no color profile is applied.
   - Animated files (`ANIM`, `ANMF`) are rejected with an error. So are VP8 interframes, which a still image never has.
-  - Files from `encode_webp` (a `VP8X` header and a zlib `RGBA` chunk) still load.
+  - Legacy files with a `VP8X` header and a zlib `RGBA` chunk still load.
 - ICO picks one image from the directory. BMP is uncompressed 24-bit or 32-bit. PPM/PGM is the binary Netpbm form.
-- `encode_png`, `encode_jpeg`, `encode_gif`, `encode_webp`, `encode_ico`, `encode_bmp`, and `encode_ppm` write those formats back. `encode_webp` writes its own `RGBA` chunk, not a `VP8` or `VP8L` bitstream, so other WebP readers will not open its files.
+- `encode_png`, `encode_jpeg`, `encode_gif`, `encode_webp`, `encode_ico`, `encode_bmp`, and `encode_ppm` write those formats back. `encode_webp` writes a standard simple lossless `RIFF`/`WEBP`/`VP8L` container (subtract-green transform, 6-bit color cache, and LZ77 backward references).
 - `resize_bilinear` scales an image.
 
 ## Limits
@@ -51,12 +51,12 @@ The browser is [anvil-browser](https://github.com/buntatoes/anvil-browser) (Apac
 
 | Repository | What it is |
 | --- | --- |
-| [anvil-cipher](https://github.com/buntatoes/anvil-cipher) | AES-128, AES-256, CTR, AES-256-GCM |
+| [anvil-cipher](https://github.com/buntatoes/anvil-cipher) | AES-128, AES-256, CTR, AES-256-GCM, SHA-256, HMAC-SHA256, HKDF-SHA256 |
 | [anvil-compress](https://github.com/buntatoes/anvil-compress) | DEFLATE, zlib, gzip |
 | [anvil-hpack](https://github.com/buntatoes/anvil-hpack) | HPACK header compression for HTTP/2 |
 | [anvil-image](https://github.com/buntatoes/anvil-image) | PNG, JPEG, GIF, WebP, ICO, BMP, PPM |
 | [anvil-json](https://github.com/buntatoes/anvil-json) | JSON |
-| [anvil-pqc](https://github.com/buntatoes/anvil-pqc) | ML-KEM-768, X25519, X25519MLKEM768, SHA-3 (not used by the browser yet) |
+| [anvil-pqc](https://github.com/buntatoes/anvil-pqc) | ML-KEM-768, X25519, X25519MLKEM768, SHA-3 |
 | [anvil-ttf](https://github.com/buntatoes/anvil-ttf) | TrueType and OpenType (`glyf`, `CFF `, `kern`, `GPOS`) |
 | [anvil-gpu](https://github.com/buntatoes/anvil-gpu) | Compositor passes for boxes, shadows, gradients, and NV12, on the CPU or a GPU |
 | [anvil-video](https://github.com/buntatoes/anvil-video) | CPU frames and PCM/ADPCM audio in a small MP4 container |

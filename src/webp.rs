@@ -7,12 +7,11 @@
 //! when the length is odd. These layouts are read:
 //!
 //! * simple lossy: a single `VP8 ` chunk;
-//! * simple lossless: a single `VP8L` chunk;
+//! * simple lossless: a single `VP8L` chunk (also written by [`encode_webp`](crate::encode_webp));
 //! * extended: a `VP8X` header (flags and canvas size) followed by optional
 //!   metadata chunks, an optional `ALPH` chunk, and one `VP8 ` or `VP8L`
 //!   bitstream chunk;
-//! * the layout [`encode_webp`](crate::encode_webp) writes: `VP8X` plus a
-//!   zlib `RGBA` chunk.
+//! * legacy `VP8X` plus a zlib `RGBA` chunk.
 //!
 //! `ALPH` only applies to a lossy bitstream; lossless bitstreams carry their
 //! own alpha. Animated files (`VP8X` animation flag, `ANIM`, or `ANMF`) are
@@ -210,6 +209,24 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Image, ImageError> {
     Err(ImageError::UnsupportedFormat(
         "WebP file has no image chunk",
     ))
+}
+
+/// Encode `image` as a simple lossless RIFF `WEBP` container with a `VP8L` chunk.
+pub(crate) fn encode(image: &Image) -> Vec<u8> {
+    let vp8l_payload = vp8l::encode(image.width, image.height, &image.pixels);
+    let pad = vp8l_payload.len() & 1;
+    let riff_size = (4 + 8 + vp8l_payload.len() + pad) as u32;
+    let mut out = Vec::with_capacity(8 + riff_size as usize);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&riff_size.to_le_bytes());
+    out.extend_from_slice(b"WEBP");
+    out.extend_from_slice(b"VP8L");
+    out.extend_from_slice(&(vp8l_payload.len() as u32).to_le_bytes());
+    out.extend_from_slice(&vp8l_payload);
+    if pad == 1 {
+        out.push(0);
+    }
+    out
 }
 
 #[cfg(test)]

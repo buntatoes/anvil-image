@@ -18,8 +18,9 @@
 //!   and the four-pass interlace. Later frames are not composited.
 //! * WebP: a RIFF `WEBP` container, simple or with a `VP8X` header. Lossless
 //!   `VP8L` bitstreams and lossy `VP8 ` key frames are decoded in full, and an
-//!   `ALPH` chunk supplies alpha for a lossy image. The zlib `RGBA` chunk that
-//!   [`encode_webp`] writes is read as well. Animated files are rejected.
+//!   `ALPH` chunk supplies alpha for a lossy image. Legacy `VP8X` + zlib `RGBA`
+//!   chunks are read as well. Animated files are rejected.
+
 //! * ICO and CUR: a directory with type 1 or 2. The largest entry is decoded,
 //!   either as an embedded PNG or as a 24-bit or 32-bit DIB. The AND mask is not applied.
 //! * BMP: uncompressed (`BI_RGB`) or `BI_BITFIELDS` files at 24 or 32 bits per
@@ -32,8 +33,8 @@
 //! calls it when a page image has been fetched. `anvil-dom` only stores the
 //! URL. `anvil-layout` reads intrinsic width and height from an [`Image`] the
 //! caller already decoded. `anvil-raster` samples those pixels. Encoders write the same formats back out; GIF and JPEG clamp
-//! each side to 65535 samples, and the WebP encoder does not emit a standard
-//! `VP8` or `VP8L` bitstream.
+//! each side to 65535 samples, and [`encode_webp`] writes a lossless `VP8L` bitstream.
+
 //!
 //! Width and height must each be in `1..=`[`MAX_IMAGE_DIMENSION`] and the product
 //! must be at most [`MAX_IMAGE_PIXELS`] (8192 on a side, 16,777,216 pixels).
@@ -2198,7 +2199,18 @@ pub fn encode_ico(image: &Image) -> Vec<u8> {
 /// [`compress_zlib`](anvil_compress::compress_zlib). An odd-sized payload is padded
 /// with one zero byte so the next chunk would stay even-aligned. Does not return
 /// an error. [`decode_webp`] is the matching reader.
+/// Encode `image` as a simple lossless RIFF `WEBP` container with a `VP8L` chunk.
+///
+/// The bitstream uses the subtract-green transform, a 6-bit color cache, and
+/// LZ77 backward references. Width and height are clamped into `1..=16384`.
+/// Does not return an error. [`decode_webp`] is the matching reader.
 pub fn encode_webp(image: &Image) -> Vec<u8> {
+    webp::encode(image)
+}
+
+/// Legacy RIFF `WEBP` writer (`VP8X` plus a zlib `RGBA` chunk) kept for reader compatibility tests.
+#[cfg(test)]
+pub(crate) fn encode_webp_legacy_rgba(image: &Image) -> Vec<u8> {
     let w_minus_1 = image.width.max(1) - 1;
     let h_minus_1 = image.height.max(1) - 1;
     let compressed_rgba = compress_zlib(&image.pixels);

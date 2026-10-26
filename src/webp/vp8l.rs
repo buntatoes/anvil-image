@@ -1012,6 +1012,223 @@ pub(crate) fn decode_headerless(
     decoder.decode_image_stream(width as usize, height as usize)
 }
 
+/// LSB-first bit writer for lossless `VP8L` encoding.
+struct Bits {
+    out: Vec<u8>,
+    acc: u64,
+    count: u32,
+}
+
+impl Bits {
+    fn new() -> Self {
+        Bits {
+            out: Vec::new(),
+            acc: 0,
+            count: 0,
+        }
+    }
+
+    fn put(&mut self, value: u32, count: u32) {
+        let mask = if count == 0 { 0 } else { (1u64 << count) - 1 };
+        self.acc |= (u64::from(value) & mask) << self.count;
+        self.count += count;
+        while self.count >= 8 {
+            self.out.push(self.acc as u8);
+            self.acc >>= 8;
+            self.count -= 8;
+        }
+    }
+
+    fn put_code(&mut self, code: u32, len: u8) {
+        for i in (0..len).rev() {
+            self.put((code >> i) & 1, 1);
+        }
+    }
+
+    fn finish(mut self) -> Vec<u8> {
+        if self.count > 0 {
+            self.out.push(self.acc as u8);
+        }
+        self.out
+    }
+}
+
+/// Canonical prefix code over every symbol in `0..size`, using two neighboring code lengths.
+struct EncodeCode {
+    lengths: Vec<u8>,
+    codes: Vec<u32>,
+}
+
+impl EncodeCode {
+    fn full(size: usize) -> Self {
+        let mut short = 0u32;
+        while (1usize << (short + 1)) <= size {
+            short += 1;
+        }
+        let a = (1usize << (short + 1)) - size;
+        let lengths: Vec<u8> = (0..size)
+            .map(|s| if s < a { short as u8 } else { short as u8 + 1 })
+            .collect();
+        let mut codes = vec![0u32; size];
+        let mut next = 0u32;
+        let mut prev_len = 0u8;
+        let mut order: Vec<usize> = (0..size).collect();
+        order.sort_by_key(|&s| (lengths[s], s));
+        for s in order {
+            next <<= lengths[s] - prev_len;
+            prev_len = lengths[s];
+            codes[s] = next;
+            next += 1;
+        }
+        Self { lengths, codes }
+    }
+
+    fn write_header(&self, bits: &mut Bits) {
+        let short = self.lengths[0];
+        let long_used = self.lengths.iter().any(|&l| l != short);
+        let (zero, one) = if long_used {
+            (short, short + 1)
+        } else {
+            (0, short)
+        };
+        bits.put(0, 1);
+        bits.put(15, 4);
+        for &symbol in &CODE_LENGTH_ORDER {
+            let used = symbol == usize::from(zero) || symbol == usize::from(one);
+            bits.put(u32::from(used), 3);
+        }
+        bits.put(0, 1);
+        for &len in &self.lengths {
+            bits.put(u32::from(len != zero), 1);
+        }
+    }
+
+    fn put(&self, bits: &mut Bits, symbol: usize) {
+        bits.put_code(self.codes[symbol], self.lengths[symbol]);
+    }
+}
+
+/// Prefix symbol and extra bits for a length or distance value of at least 1.
+fn encode_prefix(value: usize) -> (usize, u32, u32) {
+    let d = (value - 1) as u32;
+    if d < 4 {
+        return (d as usize, 0, 0);
+    }
+    let high = 31 - d.leading_zeros();
+    let second = (d >> (high - 1)) & 1;
+    let extra_bits = high - 1;
+    (
+        (2 * high + second) as usize,
+        extra_bits,
+        d & ((1 << extra_bits) - 1),
+    )
+}
+
+/// Encode `rgba` (`width * height * 4` bytes) as a complete `VP8L` chunk payload
+/// with the subtract-green transform, a 6-bit color cache, and LZ77 backward references.
+pub(crate) fn encode(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+    let w = width.clamp(1, 16384);
+    let h = height.clamp(1, 16384);
+    let count = (w as usize) * (h as usize);
+    let mut bits = Bits::new();
+    bits.put(u32::from(VP8L_SIGNATURE), 8);
+    bits.put(w - 1, 14);
+    bits.put(h - 1, 14);
+    let has_alpha = rgba
+        .chunks(4)
+        .take(count)
+        .any(|p| p.get(3).copied().unwrap_or(255) != 255);
+    bits.put(u32::from(has_alpha), 1);
+    bits.put(0, 3);
+    // Subtract-green transform, then end of transforms.
+    bits.put(1, 1);
+    bits.put(2, 2);
+    bits.put(0, 1);
+
+    let mut argb = Vec::with_capacity(count);
+    for i in 0..count {
+        let base = i * 4;
+        let r_raw = rgba.get(base).copied().unwrap_or(0);
+        let g = rgba.get(base + 1).copied().unwrap_or(0);
+        let b_raw = rgba.get(base + 2).copied().unwrap_or(0);
+        let a = rgba.get(base + 3).copied().unwrap_or(255);
+        let r = r_raw.wrapping_sub(g);
+        let b = b_raw.wrapping_sub(g);
+        argb.push((u32::from(a) << 24) | (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b));
+    }
+
+    const CACHE_BITS: u32 = 6;
+    const CACHE_SIZE: usize = 1 << CACHE_BITS;
+    bits.put(1, 1);
+    bits.put(CACHE_BITS, 4);
+    bits.put(0, 1); // single prefix code group
+
+    let green = EncodeCode::full(256 + 24 + CACHE_SIZE);
+    let red = EncodeCode::full(256);
+    let blue = EncodeCode::full(256);
+    let alpha = EncodeCode::full(256);
+    let dist = EncodeCode::full(40);
+    for code in [&green, &red, &blue, &alpha, &dist] {
+        code.write_header(&mut bits);
+    }
+
+    let mut cache = [0u32; CACHE_SIZE];
+    let mut cache_used = 0u64;
+    let insert = |cache: &mut [u32; CACHE_SIZE], used: &mut u64, px: u32| {
+        let idx = (0x1E35_A7BD_u32.wrapping_mul(px) >> (32 - CACHE_BITS)) as usize;
+        cache[idx] = px;
+        *used |= 1u64 << idx;
+    };
+
+    let stride = w as usize;
+    let n = argb.len();
+    let mut i = 0usize;
+    while i < n {
+        let px = argb[i];
+        let mut best_len = 0usize;
+        let mut best_dist = 1usize;
+        for cand_d in [1usize, stride] {
+            if cand_d > 0 && i >= cand_d && argb[i - cand_d] == px {
+                let mut run = 1usize;
+                while i + run < n && run < 4096 && argb[i + run] == argb[i + run - cand_d] {
+                    run += 1;
+                }
+                if run > best_len {
+                    best_len = run;
+                    best_dist = cand_d;
+                }
+            }
+        }
+        if best_len > 0 {
+            let (lsym, lnb, lextra) = encode_prefix(best_len);
+            green.put(&mut bits, 256 + lsym);
+            bits.put(lextra, lnb);
+            let (dsym, dnb, dextra) = encode_prefix(best_dist + 120);
+            dist.put(&mut bits, dsym);
+            bits.put(dextra, dnb);
+            for k in 0..best_len {
+                insert(&mut cache, &mut cache_used, argb[i + k]);
+            }
+            i += best_len;
+            continue;
+        }
+        let idx = (0x1E35_A7BD_u32.wrapping_mul(px) >> (32 - CACHE_BITS)) as usize;
+        if (cache_used & (1u64 << idx)) != 0 && cache[idx] == px {
+            green.put(&mut bits, 280 + idx);
+            i += 1;
+            continue;
+        }
+        green.put(&mut bits, ((px >> 8) & 0xFF) as usize);
+        red.put(&mut bits, ((px >> 16) & 0xFF) as usize);
+        blue.put(&mut bits, (px & 0xFF) as usize);
+        alpha.put(&mut bits, (px >> 24) as usize);
+        insert(&mut cache, &mut cache_used, px);
+        i += 1;
+    }
+
+    bits.finish()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
