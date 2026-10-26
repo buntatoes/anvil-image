@@ -5,7 +5,7 @@
 
 [package]
 name = "anvil-image"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2024"
 rust-version = "1.99.1"
 authors = ["Buntato <324143321+buntatoes@users.noreply.github.com>"]
