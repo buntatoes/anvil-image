@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-OR-Commercial
 // Copyright (c) 2026 Buntato
 // WebP files made with a stock WebP encoder, kept as byte arrays so the
 // tests need no files on disk. Each comes with a 64-bit FNV-1a checksum of

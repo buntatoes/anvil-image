@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MPL-2.0
+// SPDX-License-Identifier: LicenseRef-PolyForm-Noncommercial-1.0.0-OR-Commercial
 // Copyright (c) 2026 Buntato
 // Small WebP writer for the tests. It writes lossless (VP8L) bitstreams with
 // literals, backward references, a color cache, and the subtract-green
