@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>anvil-image</h1>
+  <h1>Anvil Image</h1>
   <p>PNG, JPEG, GIF, WebP, ICO, BMP, and PPM.</p>
   <p>
     <img src="https://img.shields.io/badge/release-v.07-e8c37a?style=flat-square" alt="v.07" />
