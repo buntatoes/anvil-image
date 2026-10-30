@@ -32,8 +32,11 @@
 //! [`decode_auto`] matches those signatures in that order. `anvil-browser`
 //! calls it when a page image has been fetched. `anvil-dom` only stores the
 //! URL. `anvil-layout` reads intrinsic width and height from an [`Image`] the
-//! caller already decoded. `anvil-raster` samples those pixels. Encoders write the same formats back out; GIF and JPEG clamp
-//! each side to 65535 samples, and [`encode_webp`] writes a lossless `VP8L` bitstream.
+//! caller already decoded. `anvil-raster` samples those pixels and downscales
+//! large images with [`resize_rgba_mipmapped`] ([`downsample_2x2`] /
+//! [`Image::mipmap_halve`] followed by [`resize_rgba_bilinear`]). Encoders write
+//! the same formats back out; GIF and JPEG clamp each side to 65535 samples,
+//! and [`encode_webp`] writes a lossless `VP8L` bitstream.
 
 //!
 //! Width and height must each be in `1..=`[`MAX_IMAGE_DIMENSION`] and the product
