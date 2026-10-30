@@ -223,13 +223,75 @@ impl Image {
         self.pixels[idx..idx + 4].copy_from_slice(&rgba);
     }
 
-    /// Resample to `new_width` by `new_height` with a bilinear filter on each channel, including alpha.
+    /// Downsample by up to 2x on each axis with a premultiplied-alpha box filter.
+    ///
+    /// Axes with length `> 1` are halved (`(len + 1) / 2`). Semi-transparent pixels are
+    /// weighted by their alpha channel so transparent neighbors never bleed dark RGB fringes
+    /// into anti-aliased icon or sprite edges.
+    pub fn mipmap_halve(&self, halve_x: bool, halve_y: bool) -> Self {
+        if self.width == 0 || self.height == 0 {
+            return Self::new(0, 0);
+        }
+        let dst_w = if halve_x && self.width > 1 {
+            self.width.div_ceil(2)
+        } else {
+            self.width
+        };
+        let dst_h = if halve_y && self.height > 1 {
+            self.height.div_ceil(2)
+        } else {
+            self.height
+        };
+        let step_x = if dst_w < self.width { 2u32 } else { 1u32 };
+        let step_y = if dst_h < self.height { 2u32 } else { 1u32 };
+        let mut out = Self::new(dst_w, dst_h);
+        for dy in 0..dst_h {
+            let sy0 = dy * step_y;
+            let sy1 = (sy0 + step_y - 1).min(self.height - 1);
+            for dx in 0..dst_w {
+                let sx0 = dx * step_x;
+                let sx1 = (sx0 + step_x - 1).min(self.width - 1);
+                let taps = [
+                    self.pixel(sx0, sy0).unwrap_or([0; 4]),
+                    self.pixel(sx1, sy0).unwrap_or([0; 4]),
+                    self.pixel(sx0, sy1).unwrap_or([0; 4]),
+                    self.pixel(sx1, sy1).unwrap_or([0; 4]),
+                ];
+                let mut sum_r = 0.0f32;
+                let mut sum_g = 0.0f32;
+                let mut sum_b = 0.0f32;
+                let mut sum_a = 0.0f32;
+                for c in taps {
+                    let a = c[3] as f32;
+                    sum_r += (c[0] as f32) * a;
+                    sum_g += (c[1] as f32) * a;
+                    sum_b += (c[2] as f32) * a;
+                    sum_a += a;
+                }
+                let out_a = (sum_a * 0.25).round().clamp(0.0, 255.0) as u8;
+                let rgba = if sum_a > 0.0 {
+                    [
+                        (sum_r / sum_a).round().clamp(0.0, 255.0) as u8,
+                        (sum_g / sum_a).round().clamp(0.0, 255.0) as u8,
+                        (sum_b / sum_a).round().clamp(0.0, 255.0) as u8,
+                        out_a,
+                    ]
+                } else {
+                    [0, 0, 0, 0]
+                };
+                out.set_pixel(dx, dy, rgba);
+            }
+        }
+        out
+    }
+
+    /// Resample to `new_width` by `new_height` with multi-step premultiplied-alpha mipmap
+    /// box pre-filtering (when downscaling by more than 2x) followed by premultiplied-alpha
+    /// bilinear interpolation.
     ///
     /// Output pixel centers are mapped with `(n + 0.5) * (src / dst) - 0.5` and clamped
-    /// to `[0, src_side - 1]`. The four surrounding source pixels are blended
-    /// independently per byte and rounded to `0..=255`. A zero destination or source
-    /// side returns [`Image::new`] without sampling. An unchanged size returns a clone.
-    /// The result is not checked against [`MAX_IMAGE_DIMENSION`].
+    /// to `[0, src_side - 1]`. A zero destination or source side returns [`Image::new`]
+    /// without sampling. An unchanged size returns a clone.
     pub fn resize_bilinear(&self, new_width: u32, new_height: u32) -> Self {
         if new_width == 0 || new_height == 0 || self.width == 0 || self.height == 0 {
             return Self::new(new_width, new_height);
@@ -237,35 +299,65 @@ impl Image {
         if new_width == self.width && new_height == self.height {
             return self.clone();
         }
+        let mut src = std::borrow::Cow::Borrowed(self);
+        while (src.width > new_width.saturating_mul(2) && src.width > 1)
+            || (src.height > new_height.saturating_mul(2) && src.height > 1)
+        {
+            let hx = src.width > new_width.saturating_mul(2) && src.width > 1;
+            let hy = src.height > new_height.saturating_mul(2) && src.height > 1;
+            let next = src.mipmap_halve(hx, hy);
+            src = std::borrow::Cow::Owned(next);
+        }
+        if src.width == new_width && src.height == new_height {
+            return src.into_owned();
+        }
+
         let mut out = Self::new(new_width, new_height);
-        let x_ratio = (self.width as f32) / (new_width as f32);
-        let y_ratio = (self.height as f32) / (new_height as f32);
+        let x_ratio = (src.width as f32) / (new_width as f32);
+        let y_ratio = (src.height as f32) / (new_height as f32);
 
         for ny in 0..new_height {
-            let sy = ((ny as f32 + 0.5) * y_ratio - 0.5).clamp(0.0, (self.height - 1) as f32);
+            let sy = ((ny as f32 + 0.5) * y_ratio - 0.5).clamp(0.0, (src.height - 1) as f32);
             let y0 = sy.floor() as u32;
-            let y1 = (y0 + 1).min(self.height - 1);
+            let y1 = (y0 + 1).min(src.height - 1);
             let wy = sy - (y0 as f32);
 
             for nx in 0..new_width {
-                let sx = ((nx as f32 + 0.5) * x_ratio - 0.5).clamp(0.0, (self.width - 1) as f32);
+                let sx = ((nx as f32 + 0.5) * x_ratio - 0.5).clamp(0.0, (src.width - 1) as f32);
                 let x0 = sx.floor() as u32;
-                let x1 = (x0 + 1).min(self.width - 1);
+                let x1 = (x0 + 1).min(src.width - 1);
                 let wx = sx - (x0 as f32);
 
-                let c00 = self.pixel(x0, y0).unwrap_or([0; 4]);
-                let c10 = self.pixel(x1, y0).unwrap_or([0; 4]);
-                let c01 = self.pixel(x0, y1).unwrap_or([0; 4]);
-                let c11 = self.pixel(x1, y1).unwrap_or([0; 4]);
+                let c00 = src.pixel(x0, y0).unwrap_or([0; 4]);
+                let c10 = src.pixel(x1, y0).unwrap_or([0; 4]);
+                let c01 = src.pixel(x0, y1).unwrap_or([0; 4]);
+                let c11 = src.pixel(x1, y1).unwrap_or([0; 4]);
 
-                let mut rgba = [0u8; 4];
-                // Separable bilinear blend. Alpha is filtered the same way as color, not premultiplied.
-                for ch in 0..4 {
-                    let top = (c00[ch] as f32) * (1.0 - wx) + (c10[ch] as f32) * wx;
-                    let bot = (c01[ch] as f32) * (1.0 - wx) + (c11[ch] as f32) * wx;
-                    let val = top * (1.0 - wy) + bot * wy;
-                    rgba[ch] = val.round().clamp(0.0, 255.0) as u8;
-                }
+                let w00 = (1.0 - wx) * (1.0 - wy);
+                let w10 = wx * (1.0 - wy);
+                let w01 = (1.0 - wx) * wy;
+                let w11 = wx * wy;
+
+                let a00 = (c00[3] as f32) * w00;
+                let a10 = (c10[3] as f32) * w10;
+                let a01 = (c01[3] as f32) * w01;
+                let a11 = (c11[3] as f32) * w11;
+                let sum_a = a00 + a10 + a01 + a11;
+                let out_a = sum_a.round().clamp(0.0, 255.0) as u8;
+                let rgba = if sum_a > 0.0 {
+                    let mut rgb = [0u8; 4];
+                    for ch in 0..3 {
+                        let pm = (c00[ch] as f32) * a00
+                            + (c10[ch] as f32) * a10
+                            + (c01[ch] as f32) * a01
+                            + (c11[ch] as f32) * a11;
+                        rgb[ch] = (pm / sum_a).round().clamp(0.0, 255.0) as u8;
+                    }
+                    rgb[3] = out_a;
+                    rgb
+                } else {
+                    [0, 0, 0, 0]
+                };
                 out.set_pixel(nx, ny, rgba);
             }
         }
@@ -2350,6 +2442,24 @@ mod tests {
         assert_eq!(scaled.height, 6);
         assert_eq!(scaled.pixel(0, 0), Some([255, 0, 0, 255]));
         assert_eq!(scaled.pixel(7, 5), Some([255, 255, 255, 255]));
+
+        // Verify premultiplied-alpha mipmap downscaling from 64x64 to 8x8 preserves RGB
+        // next to transparent (alpha=0) pixels without bleeding black into the edge.
+        let mut hi = Image::new(64, 64);
+        for y in 0..64 {
+            for x in 0..64 {
+                if x < 32 {
+                    hi.set_pixel(x, y, [240, 120, 40, 255]);
+                } else {
+                    hi.set_pixel(x, y, [0, 0, 0, 0]);
+                }
+            }
+        }
+        let down = hi.resize_bilinear(8, 8);
+        assert_eq!(down.width, 8);
+        assert_eq!(down.height, 8);
+        assert_eq!(down.pixel(0, 4), Some([240, 120, 40, 255]));
+        assert_eq!(down.pixel(7, 4), Some([0, 0, 0, 0]));
     }
 
     #[test]

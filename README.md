@@ -2,7 +2,7 @@
   <h1>Anvil Image</h1>
   <p>PNG, JPEG, GIF, WebP, ICO, BMP, and PPM.</p>
   <p>
-    <img src="https://img.shields.io/badge/release-v.07-e8c37a?style=flat-square" alt="v.07" />
+    <img src="https://img.shields.io/badge/release-v.08-e8c37a?style=flat-square" alt="v.08" />
     <img src="https://img.shields.io/badge/status-Proof_of_Concept-d4a359?style=flat-square" alt="Proof of Concept" />
     <a href="./LICENSE"><img src="https://img.shields.io/badge/license-PolyForm_Noncommercial_1.0.0_%7C_Paid_Commercial_%28Non--Compete%29-blue?style=flat-square" alt="PolyForm Noncommercial 1.0.0 | Paid Commercial (Non-Compete)" /></a>
     <a href="./SECURITY.md"><img src="https://img.shields.io/badge/security-policy-2ea44f?style=flat-square" alt="Security" /></a>
@@ -10,7 +10,7 @@
   </p>
 </div>
 
-Version 0.7.1 (`v.07`).
+Version 0.8.0 (`v.08`).
 
 It needs [anvil-compress](https://github.com/buntatoes/anvil-compress) in the directory next to this one.
 
@@ -29,7 +29,7 @@ It needs [anvil-compress](https://github.com/buntatoes/anvil-compress) in the di
   - Legacy files with a `VP8X` header and a zlib `RGBA` chunk still load.
 - ICO picks one image from the directory. BMP is uncompressed 24-bit or 32-bit. PPM/PGM is the binary Netpbm form.
 - `encode_png`, `encode_jpeg`, `encode_gif`, `encode_webp`, `encode_ico`, `encode_bmp`, and `encode_ppm` write those formats back. `encode_webp` writes a standard simple lossless `RIFF`/`WEBP`/`VP8L` container (subtract-green transform, 6-bit color cache, and LZ77 backward references).
-- `resize_bilinear` scales an image.
+- `resize_bilinear` scales an image, iteratively halving with premultiplied-alpha 2x2 mipmap box filtering (`mipmap_halve`) when downsampling by more than 2x before the final bilinear pass.
 
 ## Limits
 
