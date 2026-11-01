@@ -21,4 +21,3 @@ categories = ["multimedia::images", "rendering::data-formats"]
 publish = false
 
 [dependencies]
-anvil-compress = { path = "../anvil-compress" }

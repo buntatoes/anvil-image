@@ -48,7 +48,8 @@
 
 use std::fmt;
 
-use anvil_compress::{CompressError, compress_zlib, crc32, decompress_zlib_bounded};
+pub mod anvil_compress;
+use crate::anvil_compress::{CompressError, compress_zlib, crc32, decompress_zlib_bounded};
 
 mod webp;
 

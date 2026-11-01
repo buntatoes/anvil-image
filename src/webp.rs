@@ -21,8 +21,8 @@
 mod vp8;
 mod vp8l;
 
+use crate::anvil_compress::decompress_zlib_bounded;
 use crate::{Image, ImageError, validate_dimensions};
-use anvil_compress::decompress_zlib_bounded;
 
 /// `VP8X` flag bit for an animated file.
 const FLAG_ANIMATION: u8 = 0x02;
