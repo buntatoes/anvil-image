@@ -1,63 +1,64 @@
 <div align="center">
   <h1>Anvil Image</h1>
-  <p>PNG, JPEG, GIF, WebP, ICO, BMP, and PPM.</p>
+  <p>Clean-room PNG, JPEG, GIF, WebP, ICO, BMP, and PPM image codecs and resampling in 100% pure Go.</p>
   <p>
-    <img src="https://img.shields.io/badge/release-v.08-e8c37a?style=flat-square" alt="v.08" />
+    <img src="https://img.shields.io/badge/release-v.09-e8c37a?style=flat-square" alt="v.09" />
     <img src="https://img.shields.io/badge/status-Proof_of_Concept-d4a359?style=flat-square" alt="Proof of Concept" />
     <a href="./LICENSE"><img src="https://img.shields.io/badge/license-Noncommercial_%28based_on_PolyForm_1.0.0%29_%7C_Paid_Commercial_%28Non--Compete%29-blue?style=flat-square" alt="Noncommercial (based on PolyForm 1.0.0) | Paid Commercial (Non-Compete)" /></a>
     <a href="./SECURITY.md"><img src="https://img.shields.io/badge/security-policy-2ea44f?style=flat-square" alt="Security" /></a>
-    <img src="https://img.shields.io/badge/rust-2024-orange?style=flat-square" alt="Rust 2024" />
+    <img src="https://img.shields.io/badge/go-1.22%2B-00ADD8?style=flat-square" alt="Go 1.22+" />
   </p>
 </div>
 
-Version 0.8.0 (`v.08`).
+Version 0.9.0 (`v.09`).
 
-It needs [anvil-compress](https://github.com/buntatoes/anvil-compress) in the directory next to this one.
+It imports companion pure-Go [anvil-compress](https://github.com/buntatoes/anvil-compress) in the sibling directory for DEFLATE and CRC-32 operations. Zero external third-party Go dependencies.
 
 ## What it does
 
-- `decode_auto` picks a decoder from the file header: PNG, baseline JPEG, GIF, WebP, ICO, BMP, or PPM/PGM.
-- PNG is 8-bit, not interlaced. Color types are gray, RGB, palette, gray+alpha, and RGBA. Each chunk checksum is checked before the chunk is used.
-- JPEG is baseline (`SOF0`), gray or YCbCr. A coefficient category outside the 8-bit baseline range is an error, not a guess.
-- GIF reads a color table, transparency, interlacing, and LZW.
-- WebP decodes still images, written from the WebP spec:
-  - Lossless (`VP8L`): all four transforms (predictor, color, subtract green, color indexing), the color cache, back references, and meta prefix codes.
-  - Lossy (`VP8 `): key frames with segments, both loop filters, and all intra prediction modes. Chroma is upsampled bilinearly and converted with BT.601, so RGB values can be one step off from other decoders.
-  - Alpha on lossy images from an `ALPH` chunk, raw or lossless, with any of its three filters.
-  - The simple layout and the extended one with a `VP8X` header. ICC, EXIF, and XMP chunks are skipped, so no color profile is applied.
-  - Animated files (`ANIM`, `ANMF`) are rejected with an error. So are VP8 interframes, which a still image never has.
-  - Legacy files with a `VP8X` header and a zlib `RGBA` chunk still load.
-- ICO picks one image from the directory. BMP is uncompressed 24-bit or 32-bit. PPM/PGM is the binary Netpbm form.
-- `encode_png`, `encode_jpeg`, `encode_gif`, `encode_webp`, `encode_ico`, `encode_bmp`, and `encode_ppm` write those formats back. `encode_webp` writes a standard simple lossless `RIFF`/`WEBP`/`VP8L` container (subtract-green transform, 6-bit color cache, and LZ77 backward references).
-- `resize_bilinear` scales an image, iteratively halving with premultiplied-alpha 2x2 mipmap box filtering (`mipmap_halve`) when downsampling by more than 2x before the final bilinear pass.
+- `DecodeAuto` inspects format signatures and automatically dispatches to the correct codec: PNG, baseline JPEG, GIF, WebP, ICO/CUR, BMP, or PPM/PGM.
+- **PNG**: Clean-room RFC 2083 decoder and encoder. Reconstructs scanline filters 0..4 (None, Sub, Up, Average, Paeth) and unpacks 8-bit Gray, RGB, Indexed (PLTE/tRNS), Gray+Alpha, and RGBA into top-down 8-bit RGBA. Verifies 32-bit CRC chunk checksums against companion `anvil-compress`.
+- **JPEG**: Sequential baseline 8-bit DCT (`SOF0`) decoder and encoder. Parses `DQT`, `DHT`, `DRI`, `SOS`, reorders 8x8 blocks from zigzag order, runs 2D separable floating-point IDCT-II, and performs full-range JFIF YCbCr to RGBA conversion.
+- **GIF**: Decodes GIF87a and GIF89a streams with variable-bitlength LZW, local and global color tables, graphic control extension transparency, and 4-pass interlacing. Encodes 256-color palette GIF89a.
+- **WebP**:
+  - Lossless (`VP8L`): Canonical Huffman entropy decoder and bitwriter, 4 spatial transforms (predictor, cross-color, subtract green, color indexing), color cache, and LZ77 backward distance references.
+  - Lossy (`VP8 `): Boolean arithmetic entropy decoder, uncompressed keyframe header parsing, macroblock reconstruction, intra prediction modes, 4x4 WHT/IDCT, loop filtering, and BT.601 YUV to RGBA conversion.
+  - Container (`RIFF`/`WEBP`): Parses `VP8X`, `VP8L`, `VP8 `, `ALPH`, and `RGBA` chunks; rejects animated streams.
+- **BMP**: Decodes 1, 4, 8, 24, and 32 bpp uncompressed `BI_RGB` and `BI_BITFIELDS` bitmaps, supporting top-down and bottom-up row orders. Encodes 32-bit top-down `BI_RGB`.
+- **ICO**: Decodes Windows Icon (type 1) and Cursor (type 2) directories, extracting embedded PNG or DIB bitmaps. Encodes 1-entry ICO containers.
+- **PPM/PGM**: Decodes Netpbm binary P6 (RGB) and P5 (grayscale) streams with comment stripping. Encodes binary P6 PPM.
+- **Resampling**: `ResizeBilinear` scales images with multi-stage premultiplied-alpha 2x2 box downsampling (`MipmapHalve`) when downscaling by more than 2x, followed by premultiplied-alpha bilinear interpolation to eliminate dark fringe artifacts.
+- **CLI & Worker**: `cmd/anvil-image` provides an IPC worker communicating over stdin/stdout with 1-byte opcodes (`OP_DECODE_AUTO`, `OP_RESIZE_BILINEAR`, `OP_ENCODE_PNG`, `OP_ENCODE_BMP`, `OP_SHUTDOWN`), `--version`, and `--self-test`.
 
 ## Limits
 
-- A side longer than 8192 pixels is rejected.
-- More than 16,777,216 pixels is rejected.
-- A lossless WebP file whose prefix code tables would pass 32 MiB is rejected.
+- Width and height must be non-zero and at most 8,192 pixels on each side (`MaxImageDimension`).
+- Total pixel count is strictly capped at 16,777,216 pixels (64 MiB of 32-bit RGBA, `MaxImagePixels`).
+- Lossless WebP prefix code tables are bounded at 8M table entries.
 
-## Build
+## Build & Test
 
 ```
-cargo test
+go vet ./...
+go test -v ./...
+go run ./cmd/anvil-image --self-test
 ```
 
-Rust 2024 edition, Rust 1.99.1 or newer, and Go 1.22 or newer (for the pure-Go `anvil-compress` 0.4.0 / `v.04` companion repository built by `build.rs`).
+Go 1.22 or newer (`CGO_ENABLED=0`). Zero external Go module dependencies.
 
 ## The other repositories
 
-The browser is [anvil-browser](https://github.com/buntatoes/anvil-browser) and the page engine is [anvil-engine](https://github.com/buntatoes/anvil-engine), built alongside the nine companion libraries below. None of them come from crates.io.
+The browser is [anvil-browser](https://github.com/buntatoes/anvil-browser) and the page engine is [anvil-engine](https://github.com/buntatoes/anvil-engine), built alongside the nine companion libraries below.
 
 | Repository | What it is |
 | --- | --- |
 | [anvil-cipher](https://github.com/buntatoes/anvil-cipher) | AES-128, AES-256, CTR, AES-256-GCM, SHA-256, HMAC-SHA256, HKDF-SHA256 |
-| [anvil-compress](https://github.com/buntatoes/anvil-compress) | DEFLATE, zlib, gzip |
-| [anvil-hpack](https://github.com/buntatoes/anvil-hpack) | HPACK header compression for HTTP/2 |
-| [anvil-image](https://github.com/buntatoes/anvil-image) | PNG, JPEG, GIF, WebP (`VP8L` + `VP8 `), ICO, BMP, PPM |
-| [anvil-json](https://github.com/buntatoes/anvil-json) | JSON |
+| [anvil-compress](https://github.com/buntatoes/anvil-compress) | DEFLATE, zlib, gzip (Go) |
+| [anvil-hpack](https://github.com/buntatoes/anvil-hpack) | HPACK header compression for HTTP/2 (Go) |
+| [anvil-image](https://github.com/buntatoes/anvil-image) | PNG, JPEG, GIF, WebP (`VP8L` + `VP8 `), ICO, BMP, PPM (Go) |
+| [anvil-json](https://github.com/buntatoes/anvil-json) | JSON & RFC 6901 JSON Pointer (Go) |
 | [anvil-pqc](https://github.com/buntatoes/anvil-pqc) | ML-KEM-768, X25519, X25519MLKEM768, SHA-3 |
-| [anvil-ttf](https://github.com/buntatoes/anvil-ttf) | TrueType and OpenType (`glyf`, `CFF `, `kern`, `GPOS`) |
+| [anvil-ttf](https://github.com/buntatoes/anvil-ttf) | TrueType and OpenType (`glyf`, `CFF `, `kern`, `GPOS`) (Go) |
 | [anvil-gpu](https://github.com/buntatoes/anvil-gpu) | Compositor passes for boxes, shadows, gradients, and NV12/I420, on the CPU or a GPU |
 | [anvil-video](https://github.com/buntatoes/anvil-video) | CPU frames (AVID/ADCT) and PCM/ADPCM/FLAC/MDCT audio in MP4, fMP4, and WebM containers |
 
